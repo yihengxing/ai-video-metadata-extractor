@@ -40,6 +40,9 @@ _KEYFRAME_GRID_COUNT = _KEYFRAME_GRID_COLS * _KEYFRAME_GRID_ROWS  # 16
 _REPRESENTATIVE_TOP_N = 5
 _THUMB_BASE = os.path.expanduser("~/.ai-video-analyzer/thumbnails")
 
+# Sentinel for caching lazy-load failures (Task 11 review fix)
+_LOAD_FAILED = object()
+
 
 class VisualAnalyzer(Extractor):
     """Scene detection and keyframe extraction using PySceneDetect + OpenCV.
@@ -67,7 +70,11 @@ class VisualAnalyzer(Extractor):
     # ------------------------------------------------------------------
 
     def _get_clip(self):
-        """Lazy-load OpenCLIP model. Returns (model, preprocess, tokenizer)."""
+        """Lazy-load OpenCLIP model. Returns (model, preprocess, tokenizer).
+
+        Load failures are cached via _LOAD_FAILED sentinel so retries don't
+        hammer missing dependencies (Task 11 review fix).
+        """
         if self._clip_model is None:
             try:
                 import open_clip
@@ -79,36 +86,42 @@ class VisualAnalyzer(Extractor):
                 self._clip_model = model
                 self._clip_preprocess = preprocess
                 self._clip_tokenizer = tokenizer
-            except ImportError as e:
+            except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(
                     "OpenCLIP 未安装，风格分类不可用: %s", e
                 )
-                return None, None, None
+                self._clip_model = _LOAD_FAILED
+                self._clip_preprocess = _LOAD_FAILED
+                self._clip_tokenizer = _LOAD_FAILED
+        if self._clip_model is _LOAD_FAILED:
+            return None, None, None
         return self._clip_model, self._clip_preprocess, self._clip_tokenizer
 
     def _get_yolo(self):
-        """Lazy-load YOLOv8 ONNX model. Returns YOLO instance or None."""
+        """Lazy-load YOLOv8 model. Returns YOLO instance or None.
+
+        Load failures are cached via _LOAD_FAILED sentinel so retries don't
+        hammer missing dependencies (Task 11 review fix).
+        """
         if self._yolo_model is None:
             try:
                 from ultralytics import YOLO
                 self._yolo_model = YOLO("yolov8n.pt")
-            except ImportError as e:
-                import logging
-                logging.getLogger(__name__).warning(
-                    "ultralytics 未安装，YOLO 物体检测不可用: %s", e
-                )
-                return None
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(
                     "YOLO 模型加载失败: %s", e
                 )
-                return None
-        return self._yolo_model
+                self._yolo_model = _LOAD_FAILED
+        return self._yolo_model if self._yolo_model is not _LOAD_FAILED else None
 
     def _get_face_cascade(self):
-        """Lazy-load OpenCV Haar cascade for face detection."""
+        """Lazy-load OpenCV Haar cascade for face detection.
+
+        Load failures are cached via _LOAD_FAILED sentinel so retries don't
+        hammer missing resources (Task 11 review fix).
+        """
         if self._face_cascade is None:
             try:
                 cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -118,8 +131,8 @@ class VisualAnalyzer(Extractor):
                 logging.getLogger(__name__).warning(
                     "OpenCV 人脸检测级联加载失败: %s", e
                 )
-                return None
-        return self._face_cascade
+                self._face_cascade = _LOAD_FAILED
+        return self._face_cascade if self._face_cascade is not _LOAD_FAILED else None
 
     # ------------------------------------------------------------------
     # Task 10 analysis methods
@@ -403,6 +416,211 @@ class VisualAnalyzer(Extractor):
         }
 
     # ------------------------------------------------------------------
+    # Task 11 analysis methods
+    # ------------------------------------------------------------------
+
+    def _analyze_motion(self, file_path: str, shots: list[dict]) -> str:
+        """Compute optical-flow motion analysis at ~1 fps across the video.
+
+        Samples frames at roughly 1 fps.  For each consecutive pair, the
+        average displacement magnitude of tracked feature points is computed
+        via sparse optical flow (cv2.calcOpticalFlowPyrLK).  Segments are
+        classified as:
+
+        * 静态       — avg motion < 0.5 px
+        * 轻微运动    — avg motion 0.5 – 2.0 px
+        * 剧烈运动    — avg motion > 2.0 px
+
+        Returns a summary string such as
+        ``"静态为主 (60%), 轻微运动 (30%), 剧烈运动 (10%)"``.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        _STATIC = "静态"
+        _SLIGHT = "轻微运动"
+        _VIGOROUS = "剧烈运动"
+        _THRESHOLD_LOW = 0.5
+        _THRESHOLD_HIGH = 2.0
+
+        cap = cv2.VideoCapture(file_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        if duration <= 0 or fps <= 0:
+            cap.release()
+            logger.warning("_analyze_motion: 无法获取视频时长或帧率")
+            return "未知"
+
+        # Sample at roughly 1 fps — read every *fps* frames
+        sample_interval = max(1, int(fps))
+        classifications: list[str] = []
+
+        prev_gray = None
+        frame_idx = 0
+        read_count = 0
+
+        try:
+            while True:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                read_count += 1
+
+                if prev_gray is not None:
+                    # Detect feature points in previous frame
+                    prev_pts = cv2.goodFeaturesToTrack(
+                        prev_gray,
+                        maxCorners=200,
+                        qualityLevel=0.01,
+                        minDistance=10,
+                    )
+                    if prev_pts is not None:
+                        # Track into current frame
+                        curr_pts, status, _ = cv2.calcOpticalFlowPyrLK(
+                            prev_gray, gray, prev_pts, None
+                        )
+                        if curr_pts is not None and status is not None:
+                            # Only keep successfully tracked points
+                            status = status.reshape(-1).astype(bool)
+                            if status.sum() > 0:
+                                displacements = (
+                                    prev_pts[status] - curr_pts[status]
+                                )
+                                avg_motion = float(
+                                    (displacements ** 2).sum(axis=1).mean() ** 0.5
+                                )
+                            else:
+                                avg_motion = 0.0
+                        else:
+                            avg_motion = 0.0
+                    else:
+                        avg_motion = 0.0
+
+                    # Classify this segment
+                    if avg_motion < _THRESHOLD_LOW:
+                        classifications.append(_STATIC)
+                    elif avg_motion < _THRESHOLD_HIGH:
+                        classifications.append(_SLIGHT)
+                    else:
+                        classifications.append(_VIGOROUS)
+
+                prev_gray = gray
+                frame_idx += sample_interval
+
+        finally:
+            cap.release()
+
+        total_segments = len(classifications)
+        if total_segments == 0:
+            logger.warning("_analyze_motion: 无运动段可分析")
+            return "静态为主 (因视频过短)"
+
+        static_cnt = classifications.count(_STATIC)
+        slight_cnt = classifications.count(_SLIGHT)
+        vigorous_cnt = classifications.count(_VIGOROUS)
+
+        static_pct = round(100.0 * static_cnt / total_segments)
+        slight_pct = round(100.0 * slight_cnt / total_segments)
+        vigorous_pct = round(100.0 * vigorous_cnt / total_segments)
+
+        # Build weighted summary — list parts with >0% contribution
+        parts: list[str] = []
+        if static_pct > 0:
+            parts.append(f"{_STATIC} ({static_pct}%)")
+        if slight_pct > 0:
+            parts.append(f"{_SLIGHT} ({slight_pct}%)")
+        if vigorous_pct > 0:
+            parts.append(f"{_VIGOROUS} ({vigorous_pct}%)")
+
+        if not parts:
+            return "静态为主 (100%)"
+
+        return "，".join(parts)
+
+    def _detect_text(self, file_path: str, shots: list[dict]) -> list[dict]:
+        """Detect text regions in shot keyframes using contour-based heuristics.
+
+        For each shot's keyframe (sampled at the shot midpoint), this method
+        applies a simple contour-based text candidate detection:
+        1. Convert to grayscale and apply adaptive thresholding.
+        2. Find external contours.
+        3. Filter by aspect ratio and area to identify text-like regions.
+
+        Returns a list of dicts with keys:
+            shot_index, has_text, bbox (or None), timestamp
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        cap = cv2.VideoCapture(file_path)
+        results: list[dict] = []
+
+        try:
+            for shot in shots:
+                mid_time = (shot["start_time"] + shot["end_time"]) / 2.0
+                cap.set(cv2.CAP_PROP_POS_MSEC, mid_time * 1000.0)
+                ret, frame = cap.read()
+
+                entry: dict = {
+                    "shot_index": shot["index"],
+                    "has_text": False,
+                    "bbox": None,
+                    "timestamp": round(mid_time, 2),
+                }
+
+                if not ret:
+                    results.append(entry)
+                    continue
+
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                # Adaptive threshold to highlight potential text regions
+                thresh = cv2.adaptiveThreshold(
+                    gray, 255,
+                    cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                    cv2.THRESH_BINARY_INV,
+                    11, 2,
+                )
+                # Morphological close to merge nearby text components
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+                closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+                contours, _ = cv2.findContours(
+                    closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                )
+
+                text_bboxes: list[dict] = []
+                for cnt in contours:
+                    x, y, w, h = cv2.boundingRect(cnt)
+                    area = w * h
+                    aspect_ratio = w / h if h > 0 else 0
+
+                    # Filter: area between 100 and 10000, aspect ratio typical
+                    # of characters/words (0.1 – 10)
+                    if 100 < area < 10000 and 0.1 < aspect_ratio < 10:
+                        text_bboxes.append({
+                            "x": int(x),
+                            "y": int(y),
+                            "w": int(w),
+                            "h": int(h),
+                        })
+
+                if text_bboxes:
+                    entry["has_text"] = True
+                    entry["bbox"] = text_bboxes
+
+                results.append(entry)
+
+        finally:
+            cap.release()
+
+        return results
+
+    # ------------------------------------------------------------------
     async def extract(
         self,
         file_path: str,
@@ -485,17 +703,25 @@ class VisualAnalyzer(Extractor):
         _report(progress_cb, 92.0, "分析色彩直方图...")
         color_summary = self._analyze_colors(all_thumbnail_paths)
 
-        # -- Task 10: Face detection (94 %) ------------------------------
-        _report(progress_cb, 94.0, "检测人脸...")
+        # -- Task 10: Face detection (93 %) ------------------------------
+        _report(progress_cb, 93.0, "检测人脸...")
         face_detections = self._detect_faces(file_path, shots)
 
-        # -- Task 10: Object detection (96 %) ----------------------------
-        _report(progress_cb, 96.0, "检测物体...")
+        # -- Task 10: Object detection (94 %) ----------------------------
+        _report(progress_cb, 94.0, "检测物体...")
         object_detections = self._detect_objects(file_path, shots)
 
-        # -- Task 10: CLIP style classification (98 %) -------------------
-        _report(progress_cb, 98.0, "CLIP 风格分类...")
+        # -- Task 10: CLIP style classification (95 %) -------------------
+        _report(progress_cb, 95.0, "CLIP 风格分类...")
         style_tags = self._classify_style(all_thumbnail_paths)
+
+        # -- Task 11: Motion analysis (97 %) -----------------------------
+        _report(progress_cb, 97.0, "运动分析（光流法）...")
+        motion_summary = self._analyze_motion(file_path, shots)
+
+        # -- Task 11: Text detection (99 %) ------------------------------
+        _report(progress_cb, 99.0, "检测文字区域...")
+        text_regions = self._detect_text(file_path, shots)
 
         # -- 100 % -------------------------------------------------------
         _report(progress_cb, 100.0, "视觉分析完成")
@@ -508,10 +734,10 @@ class VisualAnalyzer(Extractor):
             "keyframe_grid_paths": grid_paths,
             "representative_frames": representative,
             "color_summary": color_summary,          # Task 10
-            "text_regions": [],                      # Task 11
+            "text_regions": text_regions,            # Task 11
             "face_detections": face_detections,      # Task 10
             "object_detections": object_detections,  # Task 10
-            "motion_summary": None,                  # Task 11
+            "motion_summary": motion_summary,        # Task 11
             "style_tags": style_tags,                # Task 10 (new field)
         }
 

@@ -111,15 +111,17 @@ async def test_extract_detects_shots():
         # style_tags should exist (new field from Task 10)
         assert "style_tags" in result
         assert isinstance(result["style_tags"], dict)
-        # Task 11 fields remain empty
-        assert result["text_regions"] == []
-        assert result["motion_summary"] is None
+        # Task 11 fields should be populated (no longer empty placeholders)
+        assert isinstance(result["text_regions"], list)
+        assert isinstance(result["motion_summary"], str)
+        # motion_summary should contain expected Chinese labels
+        assert "静态" in result["motion_summary"] or "运动" in result["motion_summary"]
 
         # Progress should have been reported
         assert len(progress_log) > 0
         pcts = [p for _, p, _ in progress_log]
         assert pcts[0] >= 0
-        assert pcts[-1] >= 90  # should have reached near-completion
+        assert pcts[-1] == 100.0  # should reach full completion
 
     finally:
         # Clean up temp video
@@ -186,6 +188,87 @@ async def test_face_detection_on_blank():
                 assert "shot_index" in entry
                 assert "face_count" in entry
                 assert entry["face_count"] == 0
+    finally:
+        try:
+            os.unlink(video_path)
+        except OSError:
+            pass
+
+
+# ====================================================================
+# Task 11 tests — motion analysis + text detection
+# ====================================================================
+
+
+def test_motion_analysis():
+    """Run _analyze_motion on a synthetic video, verify it returns a string
+    with expected Chinese motion-classification labels."""
+    from backend.modules.visual_analyzer import VisualAnalyzer
+
+    video_path = _make_test_video()
+    try:
+        analyzer = VisualAnalyzer()
+        shots = [
+            {"index": 0, "start_time": 0.0, "end_time": 2.0, "duration": 2.0,
+             "thumbnail_path": None, "is_representative": False},
+            {"index": 1, "start_time": 2.0, "end_time": 4.0, "duration": 2.0,
+             "thumbnail_path": None, "is_representative": False},
+        ]
+        result = analyzer._analyze_motion(video_path, shots)
+
+        # Must return a string
+        assert isinstance(result, str), f"Expected str, got {type(result)}"
+
+        # The synthetic video is two static solid-color blocks, so motion
+        # should be classified as "静态".  The summary string must contain
+        # at least one of the known Chinese labels.
+        has_label = (
+            "静态" in result
+            or "轻微运动" in result
+            or "剧烈运动" in result
+            or "未知" in result
+        )
+        assert has_label, f"Motion summary missing expected label: {result!r}"
+    finally:
+        try:
+            os.unlink(video_path)
+        except OSError:
+            pass
+
+
+def test_text_detection():
+    """Run _detect_text on a synthetic video (no text), verify it returns
+    a list of dicts with expected keys (shot_index, has_text, bbox, timestamp)."""
+    from backend.modules.visual_analyzer import VisualAnalyzer
+
+    video_path = _make_test_video()
+    try:
+        analyzer = VisualAnalyzer()
+        shots = [
+            {"index": 0, "start_time": 0.0, "end_time": 2.0, "duration": 2.0,
+             "thumbnail_path": None, "is_representative": False},
+            {"index": 1, "start_time": 2.0, "end_time": 4.0, "duration": 2.0,
+             "thumbnail_path": None, "is_representative": False},
+        ]
+        result = analyzer._detect_text(video_path, shots)
+
+        # Must return a list
+        assert isinstance(result, list), f"Expected list, got {type(result)}"
+
+        # The synthetic video has no text, so all entries should have has_text=False
+        # and bbox should be None
+        assert len(result) > 0, "Expected at least one result entry per shot"
+
+        for entry in result:
+            assert "shot_index" in entry, f"Missing shot_index: {entry}"
+            assert "has_text" in entry, f"Missing has_text: {entry}"
+            assert "bbox" in entry, f"Missing bbox: {entry}"
+            assert "timestamp" in entry, f"Missing timestamp: {entry}"
+            # No text on solid-color frames
+            assert entry["has_text"] is False, \
+                f"Expected has_text=False on blank video, got {entry['has_text']}"
+            assert entry["bbox"] is None or entry["bbox"] == [], \
+                f"Expected bbox=None/[] on blank video, got {entry['bbox']}"
     finally:
         try:
             os.unlink(video_path)
