@@ -620,3 +620,298 @@ def test_empty_result_keys():
         "sound_events", "voice_to_bg_ratio", "audio_structure",
     }
     assert set(result.keys()) == expected_keys
+
+
+# ===================================================================
+# Task 14: Sound Events + Loudness + Audio Structure
+# ===================================================================
+
+def test_sound_events_on_silence():
+    """_detect_sound_events on silent WAV should return empty list."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    # Create a silent WAV file
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_silent_wav(tmp.name, duration_secs=2.0)
+
+    try:
+        analyzer = AudioAnalyzer()
+        events = analyzer._detect_sound_events(tmp.name)
+
+        assert isinstance(events, list), "Sound events should be a list"
+
+        if _LIBROSA_AVAILABLE:
+            # Silent audio has no onsets → empty list
+            assert events == [], \
+                f"Expected empty list for silent audio, got: {events}"
+        else:
+            # Graceful degradation — returns empty list
+            assert events == []
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def test_loudness_analysis():
+    """_analyze_loudness returns a string matching expected pattern or None."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    # Create a WAV file with audio
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_wav_file(tmp.name, duration_secs=2.0)
+
+    try:
+        analyzer = AudioAnalyzer()
+        # Some fake text_segments for the analysis
+        text_segments: list[dict] = [
+            {"text": "test", "start": 0.0, "end": 1.0},
+        ]
+        result = analyzer._analyze_loudness(tmp.name, text_segments)
+
+        if _LIBROSA_AVAILABLE:
+            # Should return a descriptive string with LUFS
+            assert result is not None, \
+                "Expected a string result when librosa is available"
+            assert isinstance(result, str)
+            assert "LUFS" in result, \
+                f"Expected 'LUFS' in result string, got: {result}"
+            # Should contain a slash separator
+            assert " / " in result, \
+                f"Expected ' / ' separator in result, got: {result}"
+        else:
+            # Graceful degradation — returns None
+            assert result is None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def test_loudness_analysis_empty_segments():
+    """_analyze_loudness with empty text_segments still returns valid string or None."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_wav_file(tmp.name, duration_secs=2.0)
+
+    try:
+        analyzer = AudioAnalyzer()
+        result = analyzer._analyze_loudness(tmp.name, [])
+
+        if _LIBROSA_AVAILABLE:
+            assert result is not None
+            assert isinstance(result, str)
+            # With no speech segments, should indicate pure background
+            assert "背景" in result or "LUFS" in result, \
+                f"Expected background indication or LUFS, got: {result}"
+        else:
+            assert result is None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def test_structure_segmentation():
+    """_segment_structure returns None or string containing '→' or simple description."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    # Create a WAV file
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_wav_file(tmp.name, duration_secs=3.0)
+
+    try:
+        analyzer = AudioAnalyzer()
+        result = analyzer._segment_structure(tmp.name, duration=8.0)
+
+        if _LIBROSA_AVAILABLE:
+            # Should return a string (could be simple description or structured)
+            assert result is not None, \
+                "Expected a string when librosa is available"
+            assert isinstance(result, str)
+            assert len(result) > 0, "Result string should not be empty"
+        else:
+            assert result is None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def test_structure_segmentation_short_duration():
+    """_segment_structure with duration < 5s returns simple description."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_wav_file(tmp.name, duration_secs=1.0)
+
+    try:
+        analyzer = AudioAnalyzer()
+        result = analyzer._segment_structure(tmp.name, duration=3.0)
+
+        if _LIBROSA_AVAILABLE:
+            assert result is not None
+            assert isinstance(result, str)
+            # Short audio should get a simple description, not a chain
+            assert "→" not in result, \
+                f"Short audio should not have segmentation arrows, got: {result}"
+            assert "3.0s" in result or "3s" in result, \
+                f"Result should mention duration, got: {result}"
+        else:
+            assert result is None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_extract_integration_all_fields_populated():
+    """Full extract() pipeline — verify ALL Task 14 fields populated after integration."""
+    _install_mock_faster_whisper()
+    try:
+        if "backend.modules.audio_analyzer" in sys.modules:
+            del sys.modules["backend.modules.audio_analyzer"]
+        from backend.modules.audio_analyzer import AudioAnalyzer
+
+        # Prepare a real WAV file for our mock FFmpeg to "produce"
+        src_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        src_wav.close()
+        _make_wav_file(src_wav.name, duration_secs=2.0)
+
+        try:
+            # --- Mock FFmpeg subprocess ---
+            async def _fake_ffmpeg(*args, **kwargs):
+                import shutil
+                cmd = args[0] if args else []
+                output_path = cmd[-2] if len(cmd) >= 2 and cmd[-1] == "-y" else ""
+                if output_path and os.path.exists(src_wav.name):
+                    shutil.copy(src_wav.name, output_path)
+                mock_proc = MagicMock()
+                mock_proc.returncode = 0
+                mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+                return mock_proc
+
+            # --- Mock Whisper segments ---
+            class MockSegment:
+                def __init__(self, text, start, end):
+                    self.text = text
+                    self.start = start
+                    self.end = end
+
+            mock_segments = [
+                MockSegment("这是第一段", 0.0, 2.0),
+                MockSegment("这是第二段", 2.0, 4.0),
+            ]
+
+            from faster_whisper import WhisperModel as MockWhisper
+            mock_model = MagicMock()
+            mock_model.transcribe.return_value = (mock_segments, MagicMock())
+            MockWhisper.return_value = mock_model
+
+            with patch("asyncio.create_subprocess_exec", side_effect=_fake_ffmpeg), \
+                 patch("backend.modules.audio_analyzer._find_ffmpeg", return_value="ffmpeg"):
+                analyzer = AudioAnalyzer()
+
+                # Mock ALL Task 13 + 14 methods to avoid real dependencies
+                analyzer._identify_bgm = AsyncMock(return_value={
+                    "title": "Test Song",
+                    "artist": "Test Artist",
+                    "style_tags": ["pop"],
+                })
+                analyzer._analyze_bgm_features = MagicMock(return_value={
+                    "bpm": 128,
+                    "emotion": "轻快电子",
+                })
+                analyzer._classify_speech_emotion = MagicMock(return_value="激昂")
+                # Task 14 mocks
+                analyzer._detect_sound_events = MagicMock(
+                    return_value=["转场音效", "UI点击音"]
+                )
+                analyzer._analyze_loudness = MagicMock(
+                    return_value="人声占主导 / -14 LUFS"
+                )
+                analyzer._segment_structure = MagicMock(
+                    return_value="前奏(0-3s) → 主段1(3-8s) → 结尾(8-10s)"
+                )
+
+                meta = _make_test_tech_meta()
+
+                progress_log: list[tuple] = []
+
+                def _progress(module: str, pct: float, msg: str) -> None:
+                    progress_log.append((module, pct, msg))
+
+                result = await analyzer.extract("/fake/video.mp4", meta,
+                                                progress_cb=_progress)
+
+                # --- Verify ALL keys present ---
+                for key in ("full_text", "text_segments", "speech_rate",
+                            "speech_emotion", "bgm_title", "bgm_artist",
+                            "bgm_style_tags", "bgm_emotion", "bgm_bpm",
+                            "sound_events", "voice_to_bg_ratio", "audio_structure"):
+                    assert key in result, f"Missing key: {key}"
+
+                # --- Task 14 fields populated ---
+                assert result["sound_events"] == ["转场音效", "UI点击音"], \
+                    f"sound_events mismatch: {result['sound_events']}"
+                assert result["voice_to_bg_ratio"] == "人声占主导 / -14 LUFS", \
+                    f"voice_to_bg_ratio mismatch: {result['voice_to_bg_ratio']}"
+                assert result["audio_structure"] == "前奏(0-3s) → 主段1(3-8s) → 结尾(8-10s)", \
+                    f"audio_structure mismatch: {result['audio_structure']}"
+
+                # --- Verify progress includes Task 14 steps ---
+                pct_values = [p for _, p, _ in progress_log]
+                assert 96.0 in pct_values or any(p > 95 and p < 97 for p in pct_values), \
+                    f"Missing 96% progress step for sound events: {pct_values}"
+                assert 98.0 in pct_values or any(p > 97 and p < 99 for p in pct_values), \
+                    f"Missing 98% progress step for loudness: {pct_values}"
+                assert 100.0 in pct_values, \
+                    f"Missing 100% completion step: {pct_values}"
+
+                # --- Progress should start at 0 and end at 100 ---
+                assert pct_values[0] == 0.0
+                assert pct_values[-1] == 100.0
+        finally:
+            try:
+                os.unlink(src_wav.name)
+            except OSError:
+                pass
+    finally:
+        _remove_mock_faster_whisper()
+        sys.modules.pop("backend.modules.audio_analyzer", None)
+
+
+@pytest.mark.asyncio
+async def test_task14_methods_no_librosa_graceful():
+    """All Task 14 methods degrade gracefully when librosa is unavailable."""
+    # Remove librosa from sys.modules to simulate unavailability
+    librosa_in_modules = "librosa" in sys.modules
+    saved_librosa = sys.modules.pop("librosa", None)
+
+    saved_audio = sys.modules.pop("backend.modules.audio_analyzer", None)
+    try:
+        from backend.modules.audio_analyzer import AudioAnalyzer
+
+        analyzer = AudioAnalyzer()
+
+        # All three should return safe defaults without librosa
+        assert analyzer._detect_sound_events("/fake/audio.wav") == []
+        assert analyzer._analyze_loudness("/fake/audio.wav", []) is None
+        assert analyzer._segment_structure("/fake/audio.wav", 10.0) is None
+    finally:
+        if saved_audio is not None:
+            sys.modules["backend.modules.audio_analyzer"] = saved_audio
+        if librosa_in_modules and saved_librosa is not None:
+            sys.modules["librosa"] = saved_librosa
