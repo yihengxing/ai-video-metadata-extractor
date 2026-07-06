@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { PythonManager } from './python-manager';
 
 let mainWindow: BrowserWindow | null = null;
@@ -88,6 +89,19 @@ ipcMain.handle('dialog:openFile', async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
+});
+
+ipcMain.handle('dialog:saveFile', async (_event, defaultName: string, content: string) => {
+  if (!mainWindow) return false;
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultName,
+    filters: [{ name: 'All Files', extensions: ['*'] }],
+  });
+  if (!result.canceled && result.filePath) {
+    fs.writeFileSync(result.filePath, content, 'utf-8');
+    return true;
+  }
+  return false;
 });
 
 app.whenReady().then(async () => {

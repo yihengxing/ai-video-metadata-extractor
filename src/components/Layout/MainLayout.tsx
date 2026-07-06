@@ -5,13 +5,17 @@
  * │  History │  Preview + Controls    │   Results    │
  * │  (250px) │  (flex)                │   (400px)    │
  * └──────────┴────────────────────────┴──────────────┘
+ *
+ * Also manages the CompareView modal triggered by File > Compare menu.
  */
-import React from "react";
+import React, { useEffect } from "react";
 import { Layout } from "antd";
 import HistoryPanel from "../History/HistoryPanel";
 import VideoPreview from "../Preview/VideoPreview";
 import ModuleSelector from "../Preview/ModuleSelector";
 import ResultsPanel from "../Results/ResultsPanel";
+import CompareView from "../Compare/CompareView";
+import { useAnalysisStore } from "../../store/analysisStore";
 
 const { Sider, Content } = Layout;
 
@@ -36,14 +40,29 @@ const rightSiderStyle: React.CSSProperties = {
 };
 
 const MainLayout: React.FC = () => {
+  const setCompareOpen = useAnalysisStore((s) => s.setCompareOpen);
+  const setLeftResult = useAnalysisStore((s) => s.setLeftResult);
+  const setRightResult = useAnalysisStore((s) => s.setRightResult);
+
+  // Listen for menu:compare from Electron main process
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.onMenuCompare(() => {
+        setLeftResult(null);
+        setRightResult(null);
+        setCompareOpen(true);
+      });
+
+      return () => {
+        window.electronAPI.removeMenuCompareListener();
+      };
+    }
+  }, [setCompareOpen, setLeftResult, setRightResult]);
+
   return (
     <Layout style={{ height: "100vh" }}>
       {/* Left — History */}
-      <Sider
-        width={250}
-        style={siderStyle}
-        theme="dark"
-      >
+      <Sider width={250} style={siderStyle} theme="dark">
         <HistoryPanel />
       </Sider>
 
@@ -58,13 +77,12 @@ const MainLayout: React.FC = () => {
       </Content>
 
       {/* Right — Results */}
-      <Sider
-        width={400}
-        style={rightSiderStyle}
-        theme="dark"
-      >
+      <Sider width={400} style={rightSiderStyle} theme="dark">
         <ResultsPanel />
       </Sider>
+
+      {/* Compare modal */}
+      <CompareView />
     </Layout>
   );
 };

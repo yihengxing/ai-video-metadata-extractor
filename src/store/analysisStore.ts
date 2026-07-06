@@ -28,8 +28,9 @@ export interface AnalysisState {
   history: HistoryEntry[];
 
   // ---- Compare mode ----
-  compareMode: boolean;
-  compareResult: AnalysisResult | null;
+  compareOpen: boolean;
+  leftResult: AnalysisResult | null;
+  rightResult: AnalysisResult | null;
 
   // ---- Actions ----
   setFile: (path: string) => void;
@@ -41,8 +42,9 @@ export interface AnalysisState {
   setError: (error: string | null) => void;
   addToHistory: (entry: HistoryEntry) => void;
   removeFromHistory: (hash: string) => void;
-  setCompareMode: (enabled: boolean) => void;
-  setCompareResult: (result: AnalysisResult | null) => void;
+  setCompareOpen: (open: boolean) => void;
+  setLeftResult: (result: AnalysisResult | null) => void;
+  setRightResult: (result: AnalysisResult | null) => void;
   reset: () => void;
 }
 
@@ -73,8 +75,9 @@ const initialState = {
   result: null as AnalysisResult | null,
   error: null as string | null,
   history: loadHistory(),
-  compareMode: false,
-  compareResult: null as AnalysisResult | null,
+  compareOpen: false,
+  leftResult: null as AnalysisResult | null,
+  rightResult: null as AnalysisResult | null,
 };
 
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
@@ -122,10 +125,11 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
     set({ history: updated });
   },
 
-  setCompareMode: (enabled: boolean) =>
-    set({ compareMode: enabled, compareResult: enabled ? get().compareResult : null }),
+  setCompareOpen: (open: boolean) => set({ compareOpen: open }),
 
-  setCompareResult: (result: AnalysisResult | null) => set({ compareResult: result }),
+  setLeftResult: (result: AnalysisResult | null) => set({ leftResult: result }),
+
+  setRightResult: (result: AnalysisResult | null) => set({ rightResult: result }),
 
   reset: () => set({ ...initialState, history: get().history }), // preserve history
 }));

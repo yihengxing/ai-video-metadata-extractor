@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('menu:open-file', (_event) => callback());
   },
   openFileDialog: () => ipcRenderer.invoke('dialog:openFile'),
+  saveFile: (name: string, content: string) => ipcRenderer.invoke('dialog:saveFile', name, content),
   removeMenuCompareListener: () => {
     ipcRenderer.removeAllListeners('menu:compare');
   },

@@ -7,17 +7,23 @@
  * when complete.
  *
  * Panel order: 技术信息 → 源回捞 → 视觉分析 → 音频分析 → AI推断
+ *
+ * Also includes an export dropdown (导出) for downloading results in
+ * various formats via the Electron save dialog.
  */
-import React, { useMemo } from "react";
-import { Collapse, Spin, Badge, Typography } from "antd";
+import React, { useMemo, useCallback } from "react";
+import { Collapse, Spin, Badge, Typography, Dropdown, Button, Tooltip, message } from "antd";
 import {
   CheckCircleFilled,
   LoadingOutlined,
   LockOutlined,
   CloseCircleFilled,
   MinusCircleOutlined,
+  ExportOutlined,
+  DownOutlined,
 } from "@ant-design/icons";
 import { useAnalysisStore } from "../../store/analysisStore";
+import { api } from "../../services/api";
 import {
   MODULE_LABELS,
   type ModuleStatusValue,
@@ -113,8 +119,60 @@ const PANEL_DEFS = [
 
 const ResultsPanel: React.FC = () => {
   const result = useAnalysisStore((s) => s.result);
+  const currentHash = useAnalysisStore((s) => s.currentHash);
   const isAnalyzing = useAnalysisStore((s) => s.isAnalyzing);
   const selectedModules = useAnalysisStore((s) => s.selectedModules);
+
+  /** Trigger export of the current result in the given format. */
+  const handleExport = useCallback(
+    async (format: string) => {
+      if (!currentHash) {
+        message.warning("没有可导出的分析结果");
+        return;
+      }
+
+      try {
+        const content = await api.getExport(currentHash, format);
+
+        // Build a reasonable default filename
+        const extMap: Record<string, string> = {
+          json: ".json",
+          markdown: ".md",
+          comfyui_workflow: ".json",
+          comfyui_prompt: ".txt",
+          srt: ".srt",
+        };
+        const extension = extMap[format] ?? `.${format}`;
+        const defaultName = `analysis_${currentHash.slice(0, 8)}${extension}`;
+
+        // Use Electron save dialog if available, otherwise fall back to browser download
+        if (window.electronAPI?.saveFile) {
+          const saved = await window.electronAPI.saveFile(defaultName, content);
+          if (saved) {
+            message.success("导出成功");
+          }
+        } else {
+          // Browser fallback
+          const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = defaultName;
+          a.click();
+          URL.revokeObjectURL(url);
+          message.success("导出成功");
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "导出失败";
+        message.error(msg);
+      }
+    },
+    [currentHash],
+  );
+
+  // Check whether source recovery has a workflow available
+  const hasWorkflow = result?.source_recovery?.workflow_json != null;
+  const hasPrompt = result?.source_recovery?.prompt != null;
 
   // Determine active keys: always show tech if selected, show completed/running modules
   const activeKeys = useMemo(() => {
@@ -178,9 +236,56 @@ const ResultsPanel: React.FC = () => {
         <Text style={{ color: "#fff", fontSize: 15, fontWeight: 600 }}>
           分析结果
         </Text>
-        {isAnalyzing && (
-          <Badge status="processing" text={<Text style={{ color: "#1677ff", fontSize: 11 }}>分析中...</Text>} />
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {isAnalyzing && (
+            <Badge status="processing" text={<Text style={{ color: "#1677ff", fontSize: 11 }}>分析中...</Text>} />
+          )}
+          {result && (
+            <Dropdown
+              menu={{
+                items: [
+                  {
+                    key: "json",
+                    label: "JSON (.json)",
+                    icon: <ExportOutlined />,
+                    onClick: () => handleExport("json"),
+                  },
+                  {
+                    key: "markdown",
+                    label: "Markdown 报告 (.md)",
+                    icon: <ExportOutlined />,
+                    onClick: () => handleExport("markdown"),
+                  },
+                  {
+                    key: "comfyui_workflow",
+                    label: "ComfyUI Workflow JSON (.json)",
+                    icon: <ExportOutlined />,
+                    disabled: !hasWorkflow,
+                    onClick: () => handleExport("comfyui_workflow"),
+                  },
+                  {
+                    key: "comfyui_prompt",
+                    label: "ComfyUI Prompt (.txt)",
+                    icon: <ExportOutlined />,
+                    disabled: !hasPrompt,
+                    onClick: () => handleExport("comfyui_prompt"),
+                  },
+                  {
+                    key: "srt",
+                    label: "SRT 字幕 (.srt)",
+                    icon: <ExportOutlined />,
+                    onClick: () => handleExport("srt"),
+                  },
+                ],
+              }}
+              trigger={["click"]}
+            >
+              <Button size="small" icon={<ExportOutlined />}>
+                导出 <DownOutlined />
+              </Button>
+            </Dropdown>
+          )}
+        </div>
       </div>
 
       {!result && !isAnalyzing && (
