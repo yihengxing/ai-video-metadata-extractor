@@ -1,9 +1,17 @@
-"""FastAPI 应用入口 — AI短视频元数据逆向提取工具后端。"""
+"""FastAPI application entry point -- AI video metadata reverse-engineering tool.
+
+v1.3: uses the :class:`AnalysisOrchestrator` to run multi-module analysis
+asynchronously in the background and streams real-time progress via WebSocket.
+"""
 from __future__ import annotations
+import asyncio
 from pathlib import Path
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+from backend.orchestrator import AnalysisOrchestrator, WebSocketManager
 
 app = FastAPI(title="AI Video Metadata Extractor", version="1.3.0")
 
@@ -14,25 +22,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 简易内存状态（后续 task 集成 orchestrator）
-_analysis_states: dict[str, dict] = {}
-_ws_connections: dict[str, list[WebSocket]] = {}
+# ---------------------------------------------------------------------------
+# Global singletons
+# ---------------------------------------------------------------------------
+orchestrator = AnalysisOrchestrator()
+ws_manager = WebSocketManager()
 
+# Legacy in-memory state kept in sync by the orchestrator
+_analysis_states: dict[str, dict] = {}
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models
+# ---------------------------------------------------------------------------
 
 class AnalyzeRequest(BaseModel):
-    file_path: str = Field(..., description="视频文件绝对路径")
+    file_path: str = Field(..., description="Absolute path to the video file")
     modules: list[str] = Field(
         default=["tech", "visual", "audio", "ai", "source_recovery"],
-        description="启用的模块列表",
+        description="Enabled module list",
     )
 
 
 class AnalyzeResponse(BaseModel):
     file_hash: str
-    message: str
+    message: str = ""
+    cached: bool = False
 
 
-# ---- /cache deferred imports (CacheService from Task 6) ----
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _get_cache_service():
     """Import CacheService lazily (Task 6). Returns None if unavailable."""
@@ -43,7 +63,10 @@ def _get_cache_service():
         return None
 
 
-# ---- Endpoints ----
+# ---------------------------------------------------------------------------
+# REST endpoints
+# ---------------------------------------------------------------------------
+
 
 @app.get("/health")
 async def health():
@@ -52,7 +75,12 @@ async def health():
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def start_analysis(req: AnalyzeRequest):
-    """启动视频分析任务。返回文件哈希作为追踪 ID。"""
+    """Start a video analysis job.
+
+    Validates the file, computes the SHA-256 hash, checks the cache, and
+    launches the pipeline as an async background task.  Returns immediately
+    with the file_hash so the frontend can subscribe to the WebSocket.
+    """
     from backend.utils.file_utils import validate_video_file, compute_sha256
 
     ok, err = validate_video_file(req.file_path)
@@ -61,17 +89,31 @@ async def start_analysis(req: AnalyzeRequest):
         return JSONResponse(status_code=400, content={"error": err})
 
     file_hash = compute_sha256(req.file_path)
+
+    # Cache hit → return immediately
+    cache = _get_cache_service()
+    if cache and cache.exists(file_hash):
+        return AnalyzeResponse(file_hash=file_hash, cached=True,
+                                message="分析结果已缓存")
+
+    # Initialise state so /status returns something useful immediately
     _analysis_states[file_hash] = {
-        "status": "pending",
+        "status": "running",
         "file_path": req.file_path,
         "modules": req.modules,
     }
-    return AnalyzeResponse(file_hash=file_hash, message="分析任务已创建")
+
+    # Launch the pipeline in the background
+    asyncio.create_task(
+        _run_analysis_background(req.file_path, req.modules, file_hash)
+    )
+
+    return AnalyzeResponse(file_hash=file_hash, message="分析已开始")
 
 
 @app.get("/analyze/{file_hash}/status")
 async def get_analysis_status(file_hash: str):
-    """查询分析任务状态。"""
+    """Query the status of an analysis job."""
     state = _analysis_states.get(file_hash)
     if state is None:
         from fastapi.responses import JSONResponse
@@ -79,22 +121,9 @@ async def get_analysis_status(file_hash: str):
     return state
 
 
-@app.websocket("/ws/{file_hash}")
-async def websocket_progress(websocket: WebSocket, file_hash: str):
-    """WebSocket 端点 — 推送实时分析进度。"""
-    await websocket.accept()
-    conns = _ws_connections.setdefault(file_hash, [])
-    conns.append(websocket)
-    try:
-        while True:
-            await websocket.receive_text()  # keep-alive
-    except WebSocketDisconnect:
-        conns.remove(websocket)
-
-
 @app.get("/cache/{file_hash}")
 async def get_cached_result(file_hash: str):
-    """读取缓存的分析结果。"""
+    """Read a cached analysis result."""
     cache = _get_cache_service()
     if cache is None:
         from fastapi.responses import JSONResponse
@@ -111,7 +140,7 @@ async def get_cached_result(file_hash: str):
 
 @app.delete("/cache/{file_hash}")
 async def delete_cached_result(file_hash: str):
-    """删除缓存的分析结果。"""
+    """Delete a cached analysis result."""
     cache = _get_cache_service()
     if cache is None:
         from fastapi.responses import JSONResponse
@@ -121,3 +150,52 @@ async def delete_cached_result(file_hash: str):
         )
     cache.delete(file_hash)
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket endpoint
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/{file_hash}")
+async def websocket_progress(websocket: WebSocket, file_hash: str):
+    """WebSocket endpoint --- pushes real-time analysis progress.
+
+    The orchestrator broadcasts ``AnalysisProgress`` JSON messages after
+    each pipeline step.
+    """
+    await websocket.accept()
+    ws_manager.register(file_hash, websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep-alive
+    except WebSocketDisconnect:
+        ws_manager.unregister(file_hash, websocket)
+
+
+# ---------------------------------------------------------------------------
+# Background task helpers
+# ---------------------------------------------------------------------------
+
+async def _run_analysis_background(
+    file_path: str,
+    modules: list[str],
+    file_hash: str,
+) -> None:
+    """Run the full pipeline in the background and update in-memory state."""
+    try:
+        result = await orchestrator.run_analysis(
+            file_path, modules, ws_manager=ws_manager,
+        )
+        _analysis_states[file_hash] = {
+            "status": "completed",
+            "file_path": file_path,
+            "modules": modules,
+            "result": result.model_dump(),
+        }
+    except Exception as exc:
+        _analysis_states[file_hash] = {
+            "status": "failed",
+            "file_path": file_path,
+            "modules": modules,
+            "error": str(exc),
+        }

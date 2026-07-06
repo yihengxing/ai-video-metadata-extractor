@@ -1,17 +1,58 @@
 appId: com.ai-video-metadata-extractor
 productName: AI视频元数据提取工具
+copyright: Copyright (c) 2025
+
 directories:
   output: release
   buildResources: build
+
 files:
   - dist/**/*
   - backend/**/*
   - node_modules/**/*
+
 extraResources:
   - from: ffmpeg/
     to: ffmpeg/
+    filter:
+      - "**/*"
   - from: python-embedded/
     to: python-embedded/
+    filter:
+      - "**/*"
+
 win:
-  target: nsis
+  target:
+    - target: nsis
+      arch:
+        - x64
   icon: build/icon.ico
+  requestedExecutionLevel: asInvoker
+  signingHashAlgorithms:
+    - sha256
+
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  menuCategory: AI工具
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerLanguages:
+    - zh_CN
+    - en_US
+  language: "2052"  # Chinese (Simplified)
+  displayLanguageSelector: false
+  shortcutName: AI视频元数据提取工具
+  uninstallDisplayName: AI视频元数据提取工具
+  deleteAppDataOnUninstall: false
+  warningsAsErrors: false
+
+asar: true
+asarUnpack:
+  - "**/ffmpeg/**"
+  - "**/python-embedded/**"
+  - "**/backend/**"

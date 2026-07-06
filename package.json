@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "main": "dist/electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json -w\" \"electron .\"",
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build && tsc -p tsconfig.electron.json",
-    "pack": "electron-builder"
+    "pack": "npm run build && electron-builder --win",
+    "pack:dir": "npm run build && electron-builder --win --dir",
+    "test:backend": "cd backend && python -m pytest ../tests/backend/ -v"
   },
   "dependencies": {
     "react": "^18.3.0",
@@ -23,6 +25,7 @@
     "typescript": "^5.5.0",
     "vite": "^5.3.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "concurrently": "^8.0.0"
+    "concurrently": "^8.0.0",
+    "wait-on": "^7.2.0"
   }
 }
