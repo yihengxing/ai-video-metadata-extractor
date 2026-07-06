@@ -67,8 +67,9 @@ class Settings:
         to_save = dict(self.data)
         # Encrypt sensitive fields
         for field in ("llm_api_key", "saucenao_api_key", "acrcloud_key", "acrcloud_secret"):
-            if to_save.get(field):
-                to_save[field] = self.fernet.encrypt(to_save[field].encode()).decode()
+            if field in to_save:
+                val = to_save[field] or ""
+                to_save[field] = self.fernet.encrypt(val.encode()).decode()
         os.chmod(str(CONFIG_DIR), 0o700)
         CONFIG_FILE.write_text(json.dumps(to_save, indent=2, ensure_ascii=False))
         os.chmod(str(CONFIG_FILE), 0o600)

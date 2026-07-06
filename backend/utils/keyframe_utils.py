@@ -30,9 +30,9 @@ def preprocess_for_upload(image_path: str, max_side: int = 1000,
 
 
 def rank_representative_frames(shot_thumbnails: List[str], top_n: int = 5) -> List[str]:
-    """按镜头权重 + 画面复杂度排序，返回 top_n 代表帧路径。
-    排序规则: (1) 镜头时长权重 (2) 画面熵值 (复杂度) (3) 无文字区域优先。
-    v1.3: 为源回捞匹配器提供最优输入。
+    """按画面复杂度排序，返回 top_n 代表帧路径。
+    排序规则: 使用拉普拉斯方差（Laplacian variance）作为画面复杂度度量，复杂度越高排名越前。
+    v1.3: 为源回捞匹配器提供最优输入。镜头权重和文字区域偏好留待后续版本增强。
     """
     import cv2
     import numpy as np
