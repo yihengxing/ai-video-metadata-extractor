@@ -11,6 +11,7 @@ import { Layout } from "antd";
 import HistoryPanel from "../History/HistoryPanel";
 import VideoPreview from "../Preview/VideoPreview";
 import ModuleSelector from "../Preview/ModuleSelector";
+import ResultsPanel from "../Results/ResultsPanel";
 
 const { Sider, Content } = Layout;
 
@@ -56,18 +57,13 @@ const MainLayout: React.FC = () => {
         </div>
       </Content>
 
-      {/* Right — Results (placeholder for now) */}
+      {/* Right — Results */}
       <Sider
         width={400}
         style={rightSiderStyle}
         theme="dark"
       >
-        <div style={{ padding: 16 }}>
-          <h3 style={{ color: "#fff", marginTop: 0 }}>分析结果</h3>
-          <p style={{ color: "#888" }}>
-            选择视频文件并点击「开始分析」后，结果将在此显示。
-          </p>
-        </div>
+        <ResultsPanel />
       </Sider>
     </Layout>
   );
