@@ -103,11 +103,16 @@ async def test_extract_detects_shots():
         # representative_frames should have at most 5
         assert 0 < len(result["representative_frames"]) <= 5
 
-        # Future fields should be None or empty
-        assert result["color_summary"] is None
+        # Task 10 fields should be populated (not None)
+        assert result["color_summary"] is not None, "color_summary should be populated by Task 10"
+        assert "dominant_hue" in result["color_summary"]
+        assert isinstance(result["face_detections"], list)
+        assert isinstance(result["object_detections"], list)
+        # style_tags should exist (new field from Task 10)
+        assert "style_tags" in result
+        assert isinstance(result["style_tags"], dict)
+        # Task 11 fields remain empty
         assert result["text_regions"] == []
-        assert result["face_detections"] == []
-        assert result["object_detections"] == []
         assert result["motion_summary"] is None
 
         # Progress should have been reported
@@ -118,6 +123,70 @@ async def test_extract_detects_shots():
 
     finally:
         # Clean up temp video
+        try:
+            os.unlink(video_path)
+        except OSError:
+            pass
+
+
+# ====================================================================
+# Task 10 tests — color analysis + face detection
+# ====================================================================
+
+
+def test_color_analysis():
+    """Create a solid red image, run _analyze_colors, verify dominant_hue is warm."""
+    from backend.modules.visual_analyzer import VisualAnalyzer
+
+    analyzer = VisualAnalyzer()
+
+    # Create a solid red (HSV hue ~0) temp image
+    import cv2
+    red_img = np.full((480, 640, 3), (0, 0, 255), dtype=np.uint8)  # BGR red
+    tmp = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
+    tmp.close()
+    cv2.imwrite(tmp.name, red_img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+    try:
+        result = analyzer._analyze_colors([tmp.name])
+        assert isinstance(result, dict)
+        assert "dominant_hue" in result
+        # Red should map to warm hue
+        assert result["dominant_hue"] in ("暖色调", "warm"), \
+            f"Expected warm hue for solid red, got {result['dominant_hue']}"
+        assert "saturation_level" in result
+        assert "description" in result
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_face_detection_on_blank():
+    """Run _detect_faces on the synthetic test video, verify it returns a list."""
+    from backend.modules.visual_analyzer import VisualAnalyzer
+
+    video_path = _make_test_video()
+    try:
+        analyzer = VisualAnalyzer()
+        # Minimal shots list for face detection
+        shots = [
+            {"index": 0, "start_time": 0.0, "end_time": 2.0, "duration": 2.0,
+             "thumbnail_path": None, "is_representative": False},
+            {"index": 1, "start_time": 2.0, "end_time": 4.0, "duration": 2.0,
+             "thumbnail_path": None, "is_representative": False},
+        ]
+        result = analyzer._detect_faces(video_path, shots)
+        assert isinstance(result, list), f"Expected list, got {type(result)}"
+        # On a blank color video, faces should be 0 (empty list or all face_count=0)
+        if len(result) > 0:
+            for entry in result:
+                assert "shot_index" in entry
+                assert "face_count" in entry
+                assert entry["face_count"] == 0
+    finally:
         try:
             os.unlink(video_path)
         except OSError:
