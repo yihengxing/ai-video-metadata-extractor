@@ -274,7 +274,7 @@ async def test_transcribe_model_cached():
 
 @pytest.mark.asyncio
 async def test_extract_with_mocked_whisper():
-    """Full extract() pipeline with mocked FFmpeg + Whisper — verify return dict."""
+    """Full extract() pipeline with mocked FFmpeg + Whisper + BGM/Speech — verify return dict."""
     _install_mock_faster_whisper()
     try:
         if "backend.modules.audio_analyzer" in sys.modules:
@@ -320,6 +320,19 @@ async def test_extract_with_mocked_whisper():
             with patch("asyncio.create_subprocess_exec", side_effect=_fake_ffmpeg), \
                  patch("backend.modules.audio_analyzer._find_ffmpeg", return_value="ffmpeg"):
                 analyzer = AudioAnalyzer()
+
+                # Mock Task 13 methods to avoid network/librosa dependencies
+                analyzer._identify_bgm = AsyncMock(return_value={
+                    "title": "Test Song",
+                    "artist": "Test Artist",
+                    "style_tags": ["pop", "electronic"],
+                })
+                analyzer._analyze_bgm_features = MagicMock(return_value={
+                    "bpm": 128,
+                    "emotion": "轻快电子",
+                })
+                analyzer._classify_speech_emotion = MagicMock(return_value="激昂")
+
                 meta = _make_test_tech_meta()
 
                 progress_log: list[tuple] = []
@@ -337,19 +350,21 @@ async def test_extract_with_mocked_whisper():
                             "sound_events", "voice_to_bg_ratio", "audio_structure"):
                     assert key in result, f"Missing key: {key}"
 
-                # --- Verify populated fields ---
+                # --- Verify populated fields (Task 12) ---
                 assert isinstance(result["full_text"], str)
                 assert len(result["full_text"]) > 0
                 assert len(result["text_segments"]) == 2
                 assert result["speech_rate"] > 0
 
-                # --- Placeholder fields ---
-                assert result["speech_emotion"] == ""
-                assert result["bgm_title"] is None
-                assert result["bgm_artist"] is None
-                assert result["bgm_style_tags"] == []
-                assert result["bgm_emotion"] is None
-                assert result["bgm_bpm"] is None
+                # --- Task 13 fields populated by mocked methods ---
+                assert result["speech_emotion"] == "激昂"
+                assert result["bgm_title"] == "Test Song"
+                assert result["bgm_artist"] == "Test Artist"
+                assert result["bgm_style_tags"] == ["pop", "electronic"]
+                assert result["bgm_emotion"] == "轻快电子"
+                assert result["bgm_bpm"] == 128
+
+                # --- Placeholder fields (Task 14) ---
                 assert result["sound_events"] == []
                 assert result["voice_to_bg_ratio"] is None
                 assert result["audio_structure"] is None
@@ -392,6 +407,168 @@ async def test_speech_rate_calculation():
 
     # Zero-duration guard
     assert analyzer._calc_speech_rate("test", [{"text": "test", "start": 0.0, "end": 0.0}]) == 0.0
+
+
+# ===================================================================
+# Task 13: BGM features & speech emotion
+# ===================================================================
+
+def _make_silent_wav(path: str, duration_secs: float = 2.0,
+                     sample_rate: int = 16000) -> str:
+    """Create a silent (all zeros) mono 16-bit PCM WAV file at *path*."""
+    import struct
+    n_frames = int(sample_rate * duration_secs)
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # 16-bit
+        wf.setframerate(sample_rate)
+        for _ in range(n_frames):
+            wf.writeframes(struct.pack("<h", 0))
+    return path
+
+
+def test_bgm_features_on_silence():
+    """Run _analyze_bgm_features on a silent WAV and verify return dict keys."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    # Create a silent WAV file
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_silent_wav(tmp.name, duration_secs=2.0)
+
+    try:
+        analyzer = AudioAnalyzer()
+        result = analyzer._analyze_bgm_features(tmp.name)
+
+        # Always check that the result dict has the expected keys
+        assert isinstance(result, dict), "Result should be a dict"
+        assert "bpm" in result, "Missing key: bpm"
+        assert "emotion" in result, "Missing key: emotion"
+
+        if _LIBROSA_AVAILABLE:
+            # librosa is available — result should have computed values
+            # (silent audio may still produce a BPM estimate, possibly None)
+            assert result["bpm"] is None or isinstance(result["bpm"], int)
+            assert result["emotion"] is not None, \
+                "emotion should be a string when librosa is available"
+        else:
+            # Graceful degradation — both values are None
+            assert result["bpm"] is None
+            assert result["emotion"] is None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+def test_speech_emotion_returns_valid_category():
+    """Verify _classify_speech_emotion returns one of the 5 valid categories."""
+    from backend.modules.audio_analyzer import AudioAnalyzer, _LIBROSA_AVAILABLE
+
+    # Create a regular (sine-wave) WAV to test classification
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_wav_file(tmp.name, duration_secs=2.0)
+
+    valid_categories = {"平静", "激昂", "悲伤", "幽默", "中性", ""}
+
+    try:
+        analyzer = AudioAnalyzer()
+        emotion = analyzer._classify_speech_emotion(tmp.name)
+
+        assert isinstance(emotion, str), "Emotion should be a string"
+        assert emotion in valid_categories, \
+            f"Got '{emotion}', expected one of {valid_categories}"
+
+        if _LIBROSA_AVAILABLE:
+            # When librosa is available, should return a non-empty category
+            assert emotion in {"平静", "激昂", "悲伤", "幽默", "中性"}, \
+                f"Expected valid emotion category, got '{emotion}'"
+        else:
+            # Graceful degradation — returns empty string
+            assert emotion == "", \
+                f"Expected empty string when librosa unavailable, got '{emotion}'"
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_bgm_identify_no_config():
+    """_identify_bgm returns None values when no API keys are configured."""
+    from backend.modules.audio_analyzer import AudioAnalyzer
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    tmp.close()
+    _make_silent_wav(tmp.name, duration_secs=1.0)
+
+    try:
+        # Mock httpx to avoid real network calls
+        with patch("httpx.AsyncClient", side_effect=Exception("no network in test")):
+            analyzer = AudioAnalyzer()
+            result = await analyzer._identify_bgm(tmp.name)
+
+            assert isinstance(result, dict)
+            assert "title" in result
+            assert "artist" in result
+            assert "style_tags" in result
+            # No API keys configured → should return None values
+            assert result["title"] is None
+            assert result["artist"] is None
+            assert result["style_tags"] == []
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_bgm_features_no_librosa_graceful():
+    """_analyze_bgm_features returns None when librosa is not available."""
+    # Remove librosa from sys.modules to simulate unavailability
+    librosa_in_modules = "librosa" in sys.modules
+    saved_librosa = sys.modules.pop("librosa", None)
+
+    # Force-reload the module to pick up _LIBROSA_AVAILABLE = False
+    saved_audio = sys.modules.pop("backend.modules.audio_analyzer", None)
+    try:
+        from backend.modules.audio_analyzer import AudioAnalyzer
+
+        analyzer = AudioAnalyzer()
+        result = analyzer._analyze_bgm_features("/nonexistent/audio.wav")
+
+        assert result == {"bpm": None, "emotion": None}
+    finally:
+        # Restore module state
+        if saved_audio is not None:
+            sys.modules["backend.modules.audio_analyzer"] = saved_audio
+        if librosa_in_modules and saved_librosa is not None:
+            sys.modules["librosa"] = saved_librosa
+
+
+@pytest.mark.asyncio
+async def test_speech_emotion_no_librosa_graceful():
+    """_classify_speech_emotion returns empty string when librosa is not available."""
+    librosa_in_modules = "librosa" in sys.modules
+    saved_librosa = sys.modules.pop("librosa", None)
+
+    saved_audio = sys.modules.pop("backend.modules.audio_analyzer", None)
+    try:
+        from backend.modules.audio_analyzer import AudioAnalyzer
+
+        analyzer = AudioAnalyzer()
+        emotion = analyzer._classify_speech_emotion("/nonexistent/audio.wav")
+
+        assert emotion == ""
+    finally:
+        if saved_audio is not None:
+            sys.modules["backend.modules.audio_analyzer"] = saved_audio
+        if librosa_in_modules and saved_librosa is not None:
+            sys.modules["librosa"] = saved_librosa
 
 
 # ===================================================================
