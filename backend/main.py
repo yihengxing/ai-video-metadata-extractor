@@ -5,9 +5,8 @@ asynchronously in the background and streams real-time progress via WebSocket.
 """
 from __future__ import annotations
 import asyncio
-from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -150,6 +149,50 @@ async def delete_cached_result(file_hash: str):
         )
     cache.delete(file_hash)
     return {"deleted": True}
+
+
+@app.get("/export/{file_hash}")
+async def export_result(file_hash: str, format: str = "json"):
+    """Export analysis result in specified format."""
+    cache = _get_cache_service()
+    if cache is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={"error": "缓存服务未就绪"},
+        )
+    result = cache.get(file_hash)
+    if result is None:
+        raise HTTPException(404, "结果不存在")
+    from backend.services.export_service import ExportService
+    exporter = ExportService()
+    # Reconstruct AnalysisResult from cached dict
+    from backend.models.schemas import AnalysisResult
+    analysis_result = AnalysisResult(**result)
+    content = exporter.export_all(analysis_result).get(format)
+    if content is None:
+        raise HTTPException(400, f"不支持的格式: {format}")
+    return {"format": format, "content": content}
+
+
+@app.get("/cache")
+async def list_cached_results():
+    """List all cached analysis results."""
+    cache = _get_cache_service()
+    if cache is None:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=503,
+            content={"error": "缓存服务未就绪"},
+        )
+    items = []
+    for entry in cache.list_all():
+        items.append({
+            "file_hash": entry.get("file_hash", ""),
+            "file_path": entry.get("file_path", ""),
+            "cached_at": entry.get("cached_at", ""),
+        })
+    return {"count": len(items), "items": items}
 
 
 # ---------------------------------------------------------------------------

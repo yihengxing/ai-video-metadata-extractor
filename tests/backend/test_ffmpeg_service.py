@@ -1,4 +1,3 @@
-import json
 import pytest
 from unittest.mock import patch, AsyncMock
 from backend.services.ffmpeg_service import parse_ffprobe_output, FFmpegService

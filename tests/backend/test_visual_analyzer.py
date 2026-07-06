@@ -156,7 +156,7 @@ def test_color_analysis():
         # Red should map to warm hue
         assert result["dominant_hue"] in ("暖色调", "warm"), \
             f"Expected warm hue for solid red, got {result['dominant_hue']}"
-        assert "saturation_level" in result
+        assert "saturation" in result
         assert "description" in result
     finally:
         try:

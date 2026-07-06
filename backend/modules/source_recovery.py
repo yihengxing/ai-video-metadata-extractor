@@ -64,6 +64,12 @@ class SourceRecoveryMatcher(Matcher):
         Progress: 0 % → 20 % (preprocessing) → 40 % (searching) →
         70 % (fetching metadata) → 90 % (aggregating) → 100 %.
         """
+        # I1: Enforce source recovery consent before any uploads
+        if not settings.source_recovery_consent:
+            logger.warning("源回捞上传同意未授权，跳过源回捞")
+            _report(progress_cb, 100.0, "源回捞上传同意未授权，已跳过")
+            return []
+
         api_key = settings.saucenao_api_key
         if not api_key:
             logger.warning("SauceNAO API key 未配置，跳过源回捞")
@@ -148,7 +154,7 @@ class SourceRecoveryMatcher(Matcher):
 
             # Populate common fields
             hit.source_url = primary_url
-            hit.similarity = max_similarity
+            hit.similarity = max_similarity / 100.0  # Normalize SauceNAO 0-100 to 0-1
             hit.hit_keyframes = hit_keyframes
             hit.total_keyframes_sent = frames_sent
 

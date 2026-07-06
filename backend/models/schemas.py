@@ -60,6 +60,7 @@ class VisualAnalysis(BaseModel):
     face_detections: list[dict] = Field(default_factory=list)
     object_detections: list[dict] = Field(default_factory=list)
     motion_summary: Optional[str] = None  # "mostly static" / "slight motion" / "heavy motion"
+    style_tags: list[str] = Field(default_factory=list)  # CLIP style classification results
 
 
 class AudioAnalysis(BaseModel):

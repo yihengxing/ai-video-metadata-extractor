@@ -185,7 +185,9 @@ class TestSourceRecoveryNoApiKey:
 
         # Ensure API key is empty
         original_key = settings.saucenao_api_key
+        original_consent = settings.source_recovery_consent
         settings.data["saucenao_api_key"] = ""
+        settings.data["source_recovery_consent"] = True
 
         try:
             matcher = SourceRecoveryMatcher()
@@ -193,6 +195,7 @@ class TestSourceRecoveryNoApiKey:
             assert result == []
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoverySaucenaoNoResults:
@@ -209,6 +212,8 @@ class TestSourceRecoverySaucenaoNoResults:
         # Ensure API key is set
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # Mock SauceNAO to return empty results
@@ -221,6 +226,7 @@ class TestSourceRecoverySaucenaoNoResults:
             assert result == []
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryCompleteMatch:
@@ -236,6 +242,8 @@ class TestSourceRecoveryCompleteMatch:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # Mock SauceNAO
@@ -288,7 +296,7 @@ class TestSourceRecoveryCompleteMatch:
             assert isinstance(hit, SourceRecoveryHit)
             assert hit.status == "complete_match"
             assert hit.source_url == "https://civitai.com/images/12345"
-            assert hit.similarity == pytest.approx(96.5, rel=0.01)
+            assert hit.similarity == pytest.approx(0.965, rel=0.01)
             assert hit.prompt == "a cyberpunk city at night, neon lights, rain"
             assert hit.seed == 42424242
             assert hit.sampler == "Euler a"
@@ -306,6 +314,7 @@ class TestSourceRecoveryCompleteMatch:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryPartialMatch:
@@ -321,6 +330,8 @@ class TestSourceRecoveryPartialMatch:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # Mock SauceNAO
@@ -366,6 +377,7 @@ class TestSourceRecoveryPartialMatch:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryEarlyStop:
@@ -381,6 +393,8 @@ class TestSourceRecoveryEarlyStop:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             import httpx as httpx_module
@@ -434,6 +448,7 @@ class TestSourceRecoveryEarlyStop:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryCivitaiFailure:
@@ -449,6 +464,8 @@ class TestSourceRecoveryCivitaiFailure:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # Mock SauceNAO with a Civitai result
@@ -483,6 +500,7 @@ class TestSourceRecoveryCivitaiFailure:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryComfyWorkflows:
@@ -498,6 +516,8 @@ class TestSourceRecoveryComfyWorkflows:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # Mock SauceNAO with comfyworkflows result
@@ -548,6 +568,7 @@ class TestSourceRecoveryComfyWorkflows:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryHitAggregation:
@@ -563,6 +584,8 @@ class TestSourceRecoveryHitAggregation:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # SauceNAO returns mixed results — URL A appears 3 times, URL B 2 times
@@ -623,6 +646,7 @@ class TestSourceRecoveryHitAggregation:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryProgressReporting:
@@ -638,6 +662,8 @@ class TestSourceRecoveryProgressReporting:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             # Mock SauceNAO
@@ -688,6 +714,7 @@ class TestSourceRecoveryProgressReporting:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent
 
 
 class TestSourceRecoveryPixivSource:
@@ -703,6 +730,8 @@ class TestSourceRecoveryPixivSource:
 
         original_key = settings.saucenao_api_key
         settings.data["saucenao_api_key"] = "test-api-key"
+        original_consent = settings.source_recovery_consent
+        settings.data["source_recovery_consent"] = True
 
         try:
             respx_mock.post("https://saucenao.com/search.php").respond(
@@ -731,3 +760,4 @@ class TestSourceRecoveryPixivSource:
 
         finally:
             settings.data["saucenao_api_key"] = original_key
+            settings.data["source_recovery_consent"] = original_consent

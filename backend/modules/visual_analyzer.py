@@ -142,7 +142,7 @@ class VisualAnalyzer(Extractor):
         """Compute HSV histogram per keyframe and classify dominant hue.
 
         Returns a ColorSummary-compatible dict with keys:
-            dominant_hue, saturation_level, description
+            dominant_hue, saturation, description
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -151,7 +151,7 @@ class VisualAnalyzer(Extractor):
             logger.warning("_analyze_colors: 无关键帧输入")
             return {
                 "dominant_hue": "中性",
-                "saturation_level": "unknown",
+                "saturation": "unknown",
                 "description": "无图像数据",
             }
 
@@ -182,7 +182,7 @@ class VisualAnalyzer(Extractor):
         if valid_count == 0:
             return {
                 "dominant_hue": "中性",
-                "saturation_level": "unknown",
+                "saturation": "unknown",
                 "description": "无法读取图像",
             }
 
@@ -213,7 +213,7 @@ class VisualAnalyzer(Extractor):
 
         return {
             "dominant_hue": dominant_hue,
-            "saturation_level": saturation_level,
+            "saturation": saturation_level,
             "description": description,
         }
 

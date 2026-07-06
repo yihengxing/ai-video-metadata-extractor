@@ -45,3 +45,23 @@ class CacheService:
         path = self._cache_path(file_hash)
         if path.exists():
             path.unlink()
+
+    def list_all(self) -> list[dict]:
+        """List all cached entries with metadata."""
+        items: list[dict] = []
+        if not self._root.exists():
+            return items
+        for prefix_dir in self._root.iterdir():
+            if not prefix_dir.is_dir():
+                continue
+            for cache_file in prefix_dir.glob("*.json"):
+                try:
+                    data = json.loads(cache_file.read_text(encoding="utf-8"))
+                    items.append({
+                        "file_hash": data.get("file_hash", cache_file.stem),
+                        "file_path": data.get("file_path", ""),
+                        "cached_at": data.get("cached_at", ""),
+                    })
+                except (json.JSONDecodeError, OSError):
+                    continue
+        return items

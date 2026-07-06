@@ -175,11 +175,30 @@ def _detect_platform_fingerprint(codec: str, profile: str) -> Optional[str]:
 
 
 def _extract_gop_info(raw: dict, video_stream: dict) -> str:
-    """提取 GOP 结构信息。简化实现 — 标记关键帧间隔。"""
-    # 完整 GOP 分析需要逐帧解析，这里做快速估算
+    """Extract GOP structure information.
+
+    Attempts to estimate GOP size from duration and frame count when ffprobe
+    does not provide explicit keyframe info.  Returns a note that full GOP
+    analysis requires deeper frame-by-frame inspection.
+    """
     duration = float(raw.get("format", {}).get("duration", 0))
-    # 默认 GOP=60（约 2 秒 @30fps），具体需要解码分析
-    return f"GOP=60（关键帧每2秒）"
+    nb_frames = int(video_stream.get("nb_frames", 0)) or int(
+        raw.get("format", {}).get("nb_frames", 0)
+    )
+
+    # If ffprobe provides has_b_frames, use it as a hint
+    has_b_frames = video_stream.get("has_b_frames")
+
+    if has_b_frames is not None:
+        return f"GOP信息: has_b_frames={has_b_frames}（帧级别GOP分析需解码器支持）"
+
+    if nb_frames > 0 and duration > 0:
+        estimated_fps = nb_frames / duration
+        # Assume typical GOP of 2 seconds worth of frames
+        estimated_gop = max(1, int(estimated_fps * 2))
+        return f"GOP信息不可用（估计约{estimated_gop}帧，需解码器精确分析）"
+
+    return "GOP信息不可用（需解码器逐帧分析）"
 
 
 class FFmpegService:
