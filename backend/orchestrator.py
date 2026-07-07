@@ -10,6 +10,7 @@ isolated and do not stop the pipeline.
 """
 from __future__ import annotations
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -239,11 +240,11 @@ class AnalysisOrchestrator:
         )
 
         # ---- step 5: cache ------------------------------------------------
-        self.cache.put(file_hash, result.model_dump())
+        self.cache.put(file_hash, json.loads(result.model_dump_json()))
         logger.info("Cached result for %s", file_hash)
 
         await self._broadcast(ws_manager, file_hash, "aggregate", "completed",
-                               100.0, partial_result=result.model_dump(),
+                               100.0, partial_result=json.loads(result.model_dump_json()),
                                message="分析完成")
 
         return result
@@ -376,7 +377,7 @@ class AnalysisOrchestrator:
             module_status["source_recovery"] = "completed"
             await self._broadcast(ws_manager, file_hash, "source_recovery",
                                    "completed", 100.0, message="源回捞完成")
-            return [h.model_dump() for h in hits] if hits else []
+            return [json.loads(h.model_dump_json()) for h in hits] if hits else []
         except Exception as exc:
             logger.exception("Source recovery failed: %s", exc)
             module_status["source_recovery"] = "failed"

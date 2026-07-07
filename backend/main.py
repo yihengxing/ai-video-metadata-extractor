@@ -5,6 +5,7 @@ asynchronously in the background and streams real-time progress via WebSocket.
 """
 from __future__ import annotations
 import asyncio
+import json
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -233,7 +234,7 @@ async def _run_analysis_background(
             "status": "completed",
             "file_path": file_path,
             "modules": modules,
-            "result": result.model_dump(),
+            "result": json.loads(result.model_dump_json()),
         }
     except Exception as exc:
         _analysis_states[file_hash] = {
