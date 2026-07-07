@@ -74,11 +74,17 @@ export function useAnalysis() {
         } else {
           store.setError("分析完成但未能获取结果");
         }
+
+        // Reset file state — user must drag a new video for next analysis
+        store.setFile("");
+        store.setSavedPath("");
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : "分析启动失败";
         store.setError(message);
         store.setIsAnalyzing(false);
+        store.setFile("");
+        store.setSavedPath("");
       }
     },
     [store],
