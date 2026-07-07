@@ -63,6 +63,7 @@ export function useAnalysis() {
         const message =
           err instanceof Error ? err.message : "分析启动失败";
         store.setError(message);
+        store.setIsAnalyzing(false);
       }
     },
     [store],
@@ -88,26 +89,30 @@ async function waitForCompletion(fileHash: string): Promise<void> {
 
   let polls = 0;
   let errorStreak = 0;
+  let lastError = "";
 
   while (polls < MAX_POLLS) {
-    await sleep(POLL_INTERVAL_MS);
+    if (polls > 0) await sleep(POLL_INTERVAL_MS);
     polls += 1;
 
     try {
       const state = await api.getAnalysisStatus(fileHash);
       errorStreak = 0;
+      lastError = "";
 
       if (state.status === "failed") {
-        const msg = (state as Record<string,unknown>).error as string || "后端分析失败，请查看服务器日志";
+        const msg = (state as Record<string,unknown>).error as string || "后端分析失败";
         throw new Error(msg);
       }
       if (state.status === "completed" || state.status === "skipped") {
         return;
       }
-    } catch {
+    } catch (err) {
       errorStreak += 1;
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[Poll #${polls}] 查询状态失败 (${errorStreak}/${ERROR_POLL_LIMIT}):`, lastError);
       if (errorStreak >= ERROR_POLL_LIMIT) {
-        throw new Error("连续查询分析状态失败，请检查后端连接");
+        throw new Error(`连续 ${ERROR_POLL_LIMIT} 次查询失败: ${lastError}`);
       }
     }
   }
