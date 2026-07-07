@@ -320,6 +320,8 @@ async def _run_analysis_background(
             "result": json.loads(result.model_dump_json()),
         }
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         _analysis_states[file_hash] = {
             "status": "failed",
             "file_path": file_path,
