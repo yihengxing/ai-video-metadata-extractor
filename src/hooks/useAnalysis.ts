@@ -22,7 +22,6 @@ export function useAnalysis() {
       if (typeof fileOrPath === "string") {
         filePath = fileOrPath;
       } else {
-        // Browser mode: use the file name as display path
         filePath = fileOrPath.name;
       }
       store.setFile(filePath);
@@ -34,15 +33,23 @@ export function useAnalysis() {
       try {
         store.setIsAnalyzing(true);
 
-        // In Electron: send path. In browser: upload file.
+        // Determine how to send the file to the backend
         let file_hash: string;
+        let saved_path: string = "";
+
         if (typeof fileOrPath === "string") {
+          // Electron mode or re-analysis with server path
           ({ file_hash } = await api.startAnalysis(fileOrPath, modules));
+          saved_path = fileOrPath;
         } else {
-          ({ file_hash } = await api.uploadAndAnalyze(fileOrPath, modules));
+          // Browser mode: upload the file
+          const resp = await api.uploadAndAnalyze(fileOrPath, modules);
+          file_hash = resp.file_hash;
+          saved_path = resp.saved_path || "";
         }
 
         store.setHash(file_hash);
+        if (saved_path) store.setSavedPath(saved_path);
 
         // Check if result is already cached (from previous analysis)
         let result = await api.getCachedResult(file_hash);

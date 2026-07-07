@@ -51,6 +51,7 @@ class AnalyzeResponse(BaseModel):
     file_hash: str
     message: str = ""
     cached: bool = False
+    saved_path: str = ""  # Server-side path (for browser uploads)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +178,8 @@ async def start_analysis_upload(
             "modules": [],
             "result": cached_data,
         }
-        return AnalyzeResponse(file_hash=file_hash, cached=True, message="分析结果已缓存")
+        return AnalyzeResponse(file_hash=file_hash, cached=True, saved_path=file_path,
+                               message="分析结果已缓存")
 
     module_list = [m.strip() for m in modules.split(",") if m.strip()]
 
@@ -189,7 +191,7 @@ async def start_analysis_upload(
 
     asyncio.create_task(_run_analysis_background(file_path, module_list, file_hash))
 
-    return AnalyzeResponse(file_hash=file_hash, message="分析已开始")
+    return AnalyzeResponse(file_hash=file_hash, saved_path=file_path, message="分析已开始")
 
 
 @app.get("/analyze/{file_hash}/status")

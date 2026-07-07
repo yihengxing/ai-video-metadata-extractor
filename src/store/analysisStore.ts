@@ -18,6 +18,7 @@ export interface AnalysisState {
   // ---- Current analysis ----
   currentFile: string | null;
   currentFileObject: File | null;  // Browser mode: the actual File object
+  currentSavedPath: string | null; // Server-side path saved after upload
   currentHash: string | null;
   selectedModules: ModuleKey[];
   isAnalyzing: boolean;
@@ -35,6 +36,7 @@ export interface AnalysisState {
 
   // ---- Actions ----
   setFile: (path: string, fileObj?: File) => void;
+  setSavedPath: (savedPath: string) => void;
   setHash: (hash: string) => void;
   toggleModule: (module: ModuleKey) => void;
   setIsAnalyzing: (v: boolean) => void;
@@ -70,6 +72,7 @@ function persistHistory(history: HistoryEntry[]): void {
 const initialState = {
   currentFile: null as string | null,
   currentFileObject: null as File | null,
+  currentSavedPath: null as string | null,
   currentHash: null as string | null,
   selectedModules: ["tech"] as ModuleKey[],
   isAnalyzing: false,

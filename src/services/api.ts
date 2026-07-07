@@ -56,11 +56,13 @@ class ApiClient {
     return res.json();
   }
 
-  /** Browser-mode: upload file content directly (no local path access). */
+  /** Browser-mode: upload file content directly (no local path access).
+   *  Returns { file_hash, saved_path } — saved_path is the server-side path
+   *  that can be used for subsequent re-analyses with different modules. */
   async uploadAndAnalyze(
     file: File,
     modules: string[],
-  ): Promise<{ file_hash: string }> {
+  ): Promise<{ file_hash: string; saved_path: string }> {
     await this.ensureInit();
     const form = new FormData();
     form.append("file", file);

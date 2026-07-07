@@ -44,6 +44,7 @@ const ModuleSelector: React.FC = () => {
   const progress = useAnalysisStore((s) => s.progress);
   const currentFile = useAnalysisStore((s) => s.currentFile);
   const currentFileObject = useAnalysisStore((s) => s.currentFileObject);
+  const currentSavedPath = useAnalysisStore((s) => s.currentSavedPath);
   const error = useAnalysisStore((s) => s.error);
   const setError = useAnalysisStore((s) => s.setError);
   const toggleModule = useAnalysisStore((s) => s.toggleModule);
@@ -55,8 +56,8 @@ const ModuleSelector: React.FC = () => {
 
   const handleStart = async () => {
     if (!currentFile) return;
-    // Pass File object if available (browser mode), otherwise pass path string
-    const input = currentFileObject ?? currentFile;
+    // Priority: saved server path > File object > filename
+    const input: string | File = currentSavedPath ?? currentFileObject ?? currentFile;
     await startAnalysis(input);
   };
 
