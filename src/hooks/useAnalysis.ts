@@ -37,9 +37,11 @@ export function useAnalysis() {
         let file_hash: string;
         let saved_path: string = "";
 
+        let cached = false;
+
         if (typeof fileOrPath === "string") {
           // Electron mode or re-analysis with server path
-          ({ file_hash } = await api.startAnalysis(fileOrPath, modules));
+          ({ file_hash, cached } = await api.startAnalysis(fileOrPath, modules));
           saved_path = fileOrPath;
         } else {
           // Browser mode: upload the file
@@ -51,17 +53,25 @@ export function useAnalysis() {
         store.setHash(file_hash);
         if (saved_path) store.setSavedPath(saved_path);
 
-        // Check if result is already cached (from previous analysis)
-        let result = await api.getCachedResult(file_hash);
-        if (result) {
-          // Cache hit — no need to poll
+        let result: Awaited<ReturnType<typeof api.getCachedResult>>;
+        if (cached) {
+          // Server indicates result already cached — fetch directly without polling
+          result = await api.getCachedResult(file_hash);
           store.setIsAnalyzing(false);
           store.setProgress("tech", 100);
         } else {
-          // Poll for completion
-          await waitForCompletion(file_hash);
-          store.setIsAnalyzing(false);
+          // Check if result is already cached (from previous analysis)
           result = await api.getCachedResult(file_hash);
+          if (result) {
+            // Cache hit — no need to poll
+            store.setIsAnalyzing(false);
+            store.setProgress("tech", 100);
+          } else {
+            // Poll for completion
+            await waitForCompletion(file_hash);
+            store.setIsAnalyzing(false);
+            result = await api.getCachedResult(file_hash);
+          }
         }
 
         if (result) {

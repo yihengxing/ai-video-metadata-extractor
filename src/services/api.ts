@@ -42,7 +42,7 @@ class ApiClient {
   async startAnalysis(
     filePath: string,
     modules: string[],
-  ): Promise<{ file_hash: string }> {
+  ): Promise<{ file_hash: string; cached: boolean }> {
     await this.ensureInit();
     const res = await fetch(`${this.baseUrl}/analyze`, {
       method: "POST",
@@ -133,7 +133,8 @@ class ApiClient {
       const body = await res.json().catch(() => ({}));
       throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
     }
-    return res.text();
+    const data = await res.json();
+    return (data as { content: string }).content;
   }
 
   // ---- Settings ----
