@@ -93,6 +93,8 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
 
   setHash: (hash: string) => set({ currentHash: hash }),
 
+  setSavedPath: (savedPath: string) => set({ currentSavedPath: savedPath }),
+
   toggleModule: (module: ModuleKey) => {
     // "tech" is always mandatory and cannot be toggled off
     if (module === "tech") return;
