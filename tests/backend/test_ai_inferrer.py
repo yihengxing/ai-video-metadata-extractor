@@ -402,7 +402,7 @@ async def test_progress_reporting():
 
                 progress_log: list[tuple] = []
 
-                def _progress(module: str, pct: float, msg: str) -> None:
+                async def _progress(module: str, pct: float, msg: str) -> None:
                     progress_log.append((module, pct, msg))
 
                 inferrer = AIInferrer()

@@ -1,12 +1,12 @@
 """分析模块抽象基类 — Extractor（提取器）与 Matcher（匹配器，v1.3）。"""
 from __future__ import annotations
 from abc import ABC, abstractmethod
-from typing import Callable, Any, Optional
+from typing import Awaitable, Callable, Any, Optional
 from backend.models.schemas import TechMetadata, SourceRecoveryHit
 
 
 # 进度回调签名: (module_name: str, progress_pct: float, message: str) -> None
-ProgressCallback = Callable[[str, float, str], None]
+ProgressCallback = Callable[[str, float, str], Awaitable[None]]
 
 
 class Extractor(ABC):

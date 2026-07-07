@@ -693,7 +693,7 @@ class TestSourceRecoveryProgressReporting:
             # Collect progress reports
             progress_reports: list[tuple[str, float, str]] = []
 
-            def progress_cb(module: str, pct: float, msg: str) -> None:
+            async def progress_cb(module: str, pct: float, msg: str) -> None:
                 progress_reports.append((module, pct, msg))
 
             matcher = SourceRecoveryMatcher()

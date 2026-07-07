@@ -125,7 +125,7 @@ class AIInferrer(Extractor):
             ``None`` / empty / 0.0 when inference cannot be performed
             (no API key, no keyframes, or all retries exhausted).
         """
-        _report(progress_cb, 0.0, "开始AI推断...")
+        await _report(progress_cb, 0.0, "开始AI推断...")
 
         # --- Check API key --------------------------------------------------
         api_key = settings.llm_api_key
@@ -134,7 +134,7 @@ class AIInferrer(Extractor):
             return self._empty_result()
 
         # --- Load keyframes ------------------------------------------------
-        _report(progress_cb, 10.0, "加载关键帧...")
+        await _report(progress_cb, 10.0, "加载关键帧...")
         if keyframe_paths is None:
             keyframe_paths = self._find_keyframes(file_path)
         keyframe_paths = [p for p in keyframe_paths if os.path.exists(p)]
@@ -142,11 +142,11 @@ class AIInferrer(Extractor):
 
         if not keyframe_paths:
             logger.warning("无可用的关键帧，跳过AI推断")
-            _report(progress_cb, 100.0, "AI推断跳过（无关键帧）")
+            await _report(progress_cb, 100.0, "AI推断跳过（无关键帧）")
             return self._empty_result()
 
         # --- Encode images as base64 ---------------------------------------
-        _report(progress_cb, 20.0, "编码关键帧为base64...")
+        await _report(progress_cb, 20.0, "编码关键帧为base64...")
         images_b64: list[str] = []
         for path in keyframe_paths:
             try:
@@ -164,16 +164,16 @@ class AIInferrer(Extractor):
         user_text = self._build_user_prompt(tech_meta, audio_text)
 
         # --- Call LLM with retry -------------------------------------------
-        _report(progress_cb, 50.0, "调用多模态LLM推断...")
+        await _report(progress_cb, 50.0, "调用多模态LLM推断...")
         response_text = await self._call_llm(images_b64, user_text)
 
         if response_text is None:
             logger.error("LLM调用失败（所有重试已用尽）")
-            _report(progress_cb, 100.0, "AI推断失败（LLM不可用）")
+            await _report(progress_cb, 100.0, "AI推断失败（LLM不可用）")
             return self._empty_result()
 
         # --- Parse response ------------------------------------------------
-        _report(progress_cb, 90.0, "解析LLM响应...")
+        await _report(progress_cb, 90.0, "解析LLM响应...")
         parsed = self._parse_response(response_text)
 
         # --- Compute overall confidence ------------------------------------
@@ -184,7 +184,7 @@ class AIInferrer(Extractor):
         ]
         parsed["overall_confidence"] = round(sum(confidences) / 3.0, 4)
 
-        _report(progress_cb, 100.0, "AI推断完成")
+        await _report(progress_cb, 100.0, "AI推断完成")
         return parsed
 
     # ------------------------------------------------------------------
@@ -552,7 +552,7 @@ class AIInferrer(Extractor):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _report(cb: Optional[ProgressCallback], pct: float, msg: str) -> None:
+async def _report(cb: Optional[ProgressCallback], pct: float, msg: str) -> None:
     """Fire progress callback if provided."""
     if cb:
-        cb("ai", pct, msg)
+        await cb("ai", pct, msg)

@@ -67,20 +67,20 @@ class SourceRecoveryMatcher(Matcher):
         # I1: Enforce source recovery consent before any uploads
         if not settings.source_recovery_consent:
             logger.warning("源回捞上传同意未授权，跳过源回捞")
-            _report(progress_cb, 100.0, "源回捞上传同意未授权，已跳过")
+            await _report(progress_cb, 100.0, "源回捞上传同意未授权，已跳过")
             return []
 
         api_key = settings.saucenao_api_key
         if not api_key:
             logger.warning("SauceNAO API key 未配置，跳过源回捞")
-            _report(progress_cb, 100.0, "SauceNAO API key 未配置，已跳过")
+            await _report(progress_cb, 100.0, "SauceNAO API key 未配置，已跳过")
             return []
 
         # -- 0 % ---------------------------------------------------------
-        _report(progress_cb, 0.0, "开始源回捞...")
+        await _report(progress_cb, 0.0, "开始源回捞...")
 
         # -- 0 % → 20 % : preprocess keyframes ---------------------------
-        _report(progress_cb, 5.0, "预处理关键帧...")
+        await _report(progress_cb, 5.0, "预处理关键帧...")
         preprocessed: list[bytes] = []
         total_frames = len(keyframe_paths)
         for idx, path in enumerate(keyframe_paths):
@@ -91,14 +91,14 @@ class SourceRecoveryMatcher(Matcher):
                 logger.warning("关键帧预处理失败 %s: %s", path, e)
             if total_frames > 0:
                 sub_pct = 20.0 * ((idx + 1) / total_frames)
-                _report(progress_cb, sub_pct, f"预处理关键帧 {idx + 1}/{total_frames}...")
+                await _report(progress_cb, sub_pct, f"预处理关键帧 {idx + 1}/{total_frames}...")
 
         if not preprocessed:
-            _report(progress_cb, 100.0, "无有效关键帧")
+            await _report(progress_cb, 100.0, "无有效关键帧")
             return []
 
         # -- 20 % → 40 % : search SauceNAO -------------------------------
-        _report(progress_cb, 20.0, "SauceNAO 反向搜索中...")
+        await _report(progress_cb, 20.0, "SauceNAO 反向搜索中...")
         saucenao_hits: list[dict] = []
         frames_sent = 0
         early_stopped = False
@@ -114,7 +114,7 @@ class SourceRecoveryMatcher(Matcher):
 
                 # Progress within 20-40 % band
                 sub_pct = 20.0 + 20.0 * (frames_sent / len(preprocessed))
-                _report(
+                await _report(
                     progress_cb, sub_pct,
                     f"SauceNAO 搜索 {frames_sent}/{len(preprocessed)}",
                 )
@@ -130,10 +130,10 @@ class SourceRecoveryMatcher(Matcher):
                     break
 
             # -- 40 % → 70 % : fetch metadata from source -----------------
-            _report(progress_cb, 40.0, "聚合搜索结果...")
+            await _report(progress_cb, 40.0, "聚合搜索结果...")
 
             if not saucenao_hits:
-                _report(progress_cb, 100.0, "SauceNAO 无结果")
+                await _report(progress_cb, 100.0, "SauceNAO 无结果")
                 return []
 
             # Aggregate hits by source URL
@@ -142,7 +142,7 @@ class SourceRecoveryMatcher(Matcher):
             primary_url = primary["url"]
             max_similarity = primary["max_similarity"]
 
-            _report(progress_cb, 50.0, f"选定主命中: {primary_url}")
+            await _report(progress_cb, 50.0, f"选定主命中: {primary_url}")
 
             # Route to appropriate metadata fetcher
             hit = await self._route_and_fetch(
@@ -150,7 +150,7 @@ class SourceRecoveryMatcher(Matcher):
             )
 
             # -- 90 % → 100 % : finalize hit -------------------------------
-            _report(progress_cb, 90.0, "汇总命中结果...")
+            await _report(progress_cb, 90.0, "汇总命中结果...")
 
             # Populate common fields
             hit.source_url = primary_url
@@ -172,7 +172,7 @@ class SourceRecoveryMatcher(Matcher):
             if not hit.source_trust:
                 hit.source_trust = _classify_trust(primary_url)
 
-            _report(progress_cb, 100.0, "源回捞完成")
+            await _report(progress_cb, 100.0, "源回捞完成")
 
         return [hit]
 
@@ -323,7 +323,7 @@ class SourceRecoveryMatcher(Matcher):
         elif "comfyworkflows.com" in url:
             return await self._scrape_comfyworkflows(client, url, progress_cb)
         else:
-            _report(progress_cb, 70.0, "非 Civitai/ComfyWorkflows 源，仅定位")
+            await _report(progress_cb, 70.0, "非 Civitai/ComfyWorkflows 源，仅定位")
             return SourceRecoveryHit(
                 status="located_only",
                 source_url=url,
@@ -348,7 +348,7 @@ class SourceRecoveryMatcher(Matcher):
                 source_url=url,
             )
 
-        _report(progress_cb, 55.0, f"查询 Civitai 图片 {image_id}...")
+        await _report(progress_cb, 55.0, f"查询 Civitai 图片 {image_id}...")
 
         # -- Fetch image metadata -----------------------------------------
         try:
@@ -387,7 +387,7 @@ class SourceRecoveryMatcher(Matcher):
             model_name = meta.get("Model") or meta.get("model")
 
         # -- Fetch workflow if available ----------------------------------
-        _report(progress_cb, 65.0, f"检查 Civitai 图片 {image_id} 工作流...")
+        await _report(progress_cb, 65.0, f"检查 Civitai 图片 {image_id} 工作流...")
         workflow_json: Optional[str] = None
 
         try:
@@ -418,7 +418,7 @@ class SourceRecoveryMatcher(Matcher):
         else:
             status = "located_only"
 
-        _report(progress_cb, 70.0, f"Civitai 元数据获取完成: {status}")
+        await _report(progress_cb, 70.0, f"Civitai 元数据获取完成: {status}")
 
         return SourceRecoveryHit(
             status=status,
@@ -444,7 +444,7 @@ class SourceRecoveryMatcher(Matcher):
         progress_cb: Optional[ProgressCallback],
     ) -> SourceRecoveryHit:
         """Scrape comfyworkflows.com page for embedded workflow JSON."""
-        _report(progress_cb, 55.0, "抓取 comfyworkflows 页面...")
+        await _report(progress_cb, 55.0, "抓取 comfyworkflows 页面...")
 
         try:
             resp = await client.get(url)
@@ -460,7 +460,7 @@ class SourceRecoveryMatcher(Matcher):
         workflow_json = _extract_workflow_from_html(html)
 
         if workflow_json:
-            _report(progress_cb, 70.0, "comfyworkflows 工作流提取成功")
+            await _report(progress_cb, 70.0, "comfyworkflows 工作流提取成功")
             return SourceRecoveryHit(
                 status="partial_match",
                 source_url=url,
@@ -480,14 +480,14 @@ class SourceRecoveryMatcher(Matcher):
 # ====================================================================
 
 
-def _report(
+async def _report(
     cb: Optional[ProgressCallback],
     pct: float,
     msg: str,
 ) -> None:
     """Fire progress callback if provided."""
     if cb:
-        cb("saucenao_router", pct, msg)
+        await cb("saucenao_router", pct, msg)
 
 
 def _extract_civitai_id(url: str) -> Optional[str]:
