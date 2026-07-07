@@ -43,6 +43,12 @@ _CLAUDE_MODEL = "claude-3-5-sonnet-20241022"
 _OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 _OPENAI_MODEL = "gpt-4o"
 
+_GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+_GEMINI_MODEL = "gemini-2.0-flash"
+
+_QWEN_API_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+_QWEN_MODEL = "qwen-vl-max"
+
 _THUMB_BASE = os.path.expanduser("~/.ai-video-analyzer/thumbnails")
 
 _SYSTEM_PROMPT = (
@@ -202,31 +208,29 @@ class AIInferrer(Extractor):
             try:
                 async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
                     if provider == "openai":
-                        body = self._build_openai_body(images_b64, user_text)
-                        headers = {
-                            "Authorization": f"Bearer {api_key}",
-                            "Content-Type": "application/json",
-                        }
-                        resp = await client.post(
-                            _OPENAI_API_URL, json=body, headers=headers,
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-                        raw_text = data["choices"][0]["message"]["content"]
+                        body, headers = self._build_openai_request(images_b64, user_text, api_key)
+                        endpoint = _OPENAI_API_URL
+                    elif provider == "gemini":
+                        body, headers = self._build_gemini_request(images_b64, user_text, api_key)
+                        endpoint = f"{_GEMINI_API_URL}?key={api_key}"
+                    elif provider == "qwen":
+                        body, headers = self._build_qwen_request(images_b64, user_text, api_key)
+                        endpoint = _QWEN_API_URL
+                    elif provider == "custom":
+                        body, headers = self._build_custom_request(images_b64, user_text, api_key)
+                        endpoint = settings.get("llm_custom_endpoint", "")
+                        if not endpoint:
+                            logger.error("自定义端点未配置")
+                            return None
                     else:
                         # Default to Claude
-                        body = self._build_claude_body(images_b64, user_text)
-                        headers = {
-                            "x-api-key": api_key,
-                            "anthropic-version": "2023-06-01",
-                            "Content-Type": "application/json",
-                        }
-                        resp = await client.post(
-                            _CLAUDE_API_URL, json=body, headers=headers,
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-                        raw_text = data["content"][0]["text"]
+                        body, headers = self._build_claude_request(images_b64, user_text, api_key)
+                        endpoint = _CLAUDE_API_URL
+
+                    resp = await client.post(endpoint, json=body, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    raw_text = self._extract_text(provider, data)
 
                     logger.info("LLM调用成功（第%d次尝试）", attempt)
                     return raw_text
@@ -243,60 +247,47 @@ class AIInferrer(Extractor):
         return None
 
     # ------------------------------------------------------------------
-    # Request body builders
+    # Request builders (one per provider)
     # ------------------------------------------------------------------
 
-    def _build_claude_body(
-        self, images_b64: list[str], user_text: str
-    ) -> dict:
-        """Build the Claude Messages API request body."""
+    def _build_claude_request(
+        self, images_b64: list[str], user_text: str, api_key: str
+    ) -> tuple[dict, dict]:
+        """Claude Messages API."""
         content: list[dict] = []
-
         for img_b64 in images_b64:
             content.append({
                 "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": "image/jpeg",
-                    "data": img_b64,
-                },
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64},
             })
+        content.append({"type": "text", "text": user_text})
 
-        content.append({
-            "type": "text",
-            "text": user_text,
-        })
-
-        return {
+        body = {
             "model": _CLAUDE_MODEL,
             "max_tokens": 2048,
             "system": _SYSTEM_PROMPT,
-            "messages": [
-                {"role": "user", "content": content},
-            ],
+            "messages": [{"role": "user", "content": content}],
         }
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        return body, headers
 
-    def _build_openai_body(
-        self, images_b64: list[str], user_text: str
-    ) -> dict:
-        """Build the OpenAI Chat Completions API request body."""
+    def _build_openai_request(
+        self, images_b64: list[str], user_text: str, api_key: str
+    ) -> tuple[dict, dict]:
+        """OpenAI Chat Completions API (GPT-4V / GPT-4o)."""
         user_content: list[dict] = []
-
         for img_b64 in images_b64:
             user_content.append({
                 "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{img_b64}",
-                    "detail": "low",
-                },
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"},
             })
+        user_content.append({"type": "text", "text": user_text})
 
-        user_content.append({
-            "type": "text",
-            "text": user_text,
-        })
-
-        return {
+        body = {
             "model": _OPENAI_MODEL,
             "max_tokens": 2048,
             "messages": [
@@ -304,6 +295,112 @@ class AIInferrer(Extractor):
                 {"role": "user", "content": user_content},
             ],
         }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        return body, headers
+
+    def _build_gemini_request(
+        self, images_b64: list[str], user_text: str, api_key: str
+    ) -> tuple[dict, dict]:
+        """Google Gemini API (Gemini 2.0 Flash — fast + free tier)."""
+        parts: list[dict] = []
+        for img_b64 in images_b64:
+            parts.append({
+                "inline_data": {"mime_type": "image/jpeg", "data": img_b64},
+            })
+        parts.append({"text": f"{_SYSTEM_PROMPT}\n\n{user_text}"})
+
+        body = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.4},
+        }
+        headers = {"Content-Type": "application/json"}
+        return body, headers
+
+    def _build_qwen_request(
+        self, images_b64: list[str], user_text: str, api_key: str
+    ) -> tuple[dict, dict]:
+        """Qwen-VL via Alibaba DashScope (OpenAI-compatible endpoint).
+        Best native Chinese multimodal model.
+        """
+        user_content: list[dict] = []
+        for img_b64 in images_b64:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            })
+        user_content.append({"type": "text", "text": user_text})
+
+        body = {
+            "model": _QWEN_MODEL,
+            "max_tokens": 2048,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        return body, headers
+
+    def _build_custom_request(
+        self, images_b64: list[str], user_text: str, api_key: str
+    ) -> tuple[dict, dict]:
+        """Custom OpenAI-compatible endpoint (e.g. API proxy, self-hosted).
+        Uses the same format as OpenAI but with configurable model name.
+        """
+        model = settings.get("llm_custom_model") or "gpt-4o"
+        user_content: list[dict] = []
+        for img_b64 in images_b64:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}", "detail": "low"},
+            })
+        user_content.append({"type": "text", "text": user_text})
+
+        body = {
+            "model": model,
+            "max_tokens": 2048,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        return body, headers
+
+    # ------------------------------------------------------------------
+    # Response text extraction (provider-specific)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_text(provider: str, data: dict) -> str:
+        """Extract the text content from a provider-specific API response."""
+        if provider == "gemini":
+            # Gemini returns: candidates[0].content.parts[0].text
+            try:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            except (KeyError, IndexError):
+                return ""
+        elif provider in ("openai", "qwen", "custom"):
+            # OpenAI-compatible: choices[0].message.content
+            try:
+                return data["choices"][0]["message"]["content"]
+            except (KeyError, IndexError):
+                return ""
+        else:
+            # Claude: content[0].text
+            try:
+                return data["content"][0]["text"]
+            except (KeyError, IndexError):
+                return ""
 
     # ------------------------------------------------------------------
     # Prompt building

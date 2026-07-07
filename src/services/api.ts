@@ -113,6 +113,28 @@ class ApiClient {
     }
     return res.text();
   }
+
+  // ---- Settings ----
+
+  async getSettings(): Promise<Record<string, unknown>> {
+    await this.ensureInit();
+    const res = await fetch(`${this.baseUrl}/settings`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async updateSettings(updates: Record<string, unknown>): Promise<void> {
+    await this.ensureInit();
+    const res = await fetch(`${this.baseUrl}/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    }
+  }
 }
 
 export const api = new ApiClient();

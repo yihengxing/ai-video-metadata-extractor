@@ -138,3 +138,28 @@ export const MODULE_LABELS: Record<string, string> = {
 
 export const MODULE_KEYS = ["tech", "visual", "audio", "ai", "source_recovery"] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
+
+// ---- LLM Provider ----
+export const LLM_PROVIDERS = ["claude", "openai", "gemini", "qwen", "custom"] as const;
+export type LLMProvider = (typeof LLM_PROVIDERS)[number];
+
+export const LLM_PROVIDER_LABELS: Record<LLMProvider, string> = {
+  claude: "Claude (Anthropic)",
+  openai: "GPT-4V / GPT-4o (OpenAI)",
+  gemini: "Gemini 2.0 Flash (Google)",
+  qwen: "Qwen-VL 通义千问 (阿里百炼)",
+  custom: "自定义端点 (OpenAI 兼容)",
+};
+
+// ---- App Settings ----
+export interface AppSettings {
+  llm_api_key: string;
+  llm_provider: LLMProvider;
+  llm_custom_endpoint: string;
+  llm_custom_model: string;
+  saucenao_api_key: string;
+  acrcloud_key: string;
+  acrcloud_secret: string;
+  source_recovery_consent: boolean;
+  theme: "dark" | "light";
+}

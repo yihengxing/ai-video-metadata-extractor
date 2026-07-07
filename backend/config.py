@@ -20,7 +20,9 @@ class Settings:
     def __init__(self) -> None:
         self.data: dict = {
             "llm_api_key": "",
-            "llm_provider": "claude",  # "claude" | "openai"
+            "llm_provider": "claude",  # "claude" | "openai" | "gemini" | "qwen" | "custom"
+            "llm_custom_endpoint": "",  # 自定义 OpenAI 兼容端点 URL
+            "llm_custom_model": "",     # 自定义模型名
             "saucenao_api_key": "",
             "acrcloud_key": "",
             "acrcloud_secret": "",

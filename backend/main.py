@@ -242,3 +242,39 @@ async def _run_analysis_background(
             "modules": modules,
             "error": str(exc),
         }
+
+
+# ---------------------------------------------------------------------------
+# Settings endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/settings")
+async def get_settings():
+    """Return all current settings (sensitive fields masked)."""
+    from backend.config import settings
+    data = dict(settings.data)
+    # Mask sensitive values
+    for key in ("llm_api_key", "saucenao_api_key", "acrcloud_key", "acrcloud_secret"):
+        if data.get(key):
+            data[key] = data[key][:4] + "****" + data[key][-4:] if len(data[key]) > 8 else "****"
+    return data
+
+
+class UpdateSettingsRequest(BaseModel):
+    updates: dict = Field(default_factory=dict)
+
+
+@app.put("/settings")
+async def update_settings(req: UpdateSettingsRequest):
+    """Update settings. Sensitive fields (API keys) are encrypted on save."""
+    from backend.config import settings
+    allowed = {
+        "llm_api_key", "llm_provider", "llm_custom_endpoint", "llm_custom_model",
+        "saucenao_api_key", "acrcloud_key", "acrcloud_secret",
+        "source_recovery_consent", "theme",
+    }
+    for key, value in req.updates.items():
+        if key in allowed:
+            settings.set(key, value)
+    settings.save()
+    return {"status": "ok", "updated": list(req.updates.keys())}
