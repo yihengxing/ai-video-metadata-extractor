@@ -44,13 +44,19 @@ export function useAnalysis() {
 
         store.setHash(file_hash);
 
-        // Poll for completion since backend is in-memory for now.
-        // WebSocket will deliver progress messages; we poll status for Done.
-        await waitForCompletion(file_hash);
-        store.setIsAnalyzing(false);
+        // Check if result is already cached (from previous analysis)
+        let result = await api.getCachedResult(file_hash);
+        if (result) {
+          // Cache hit — no need to poll
+          store.setIsAnalyzing(false);
+          store.setProgress("tech", 100);
+        } else {
+          // Poll for completion
+          await waitForCompletion(file_hash);
+          store.setIsAnalyzing(false);
+          result = await api.getCachedResult(file_hash);
+        }
 
-        // Fetch full result
-        const result = await api.getCachedResult(file_hash);
         if (result) {
           store.setResult(result);
           store.addToHistory({
@@ -58,6 +64,8 @@ export function useAnalysis() {
             filePath: filePath,
             analyzedAt: result.analyzed_at,
           });
+        } else {
+          store.setError("分析完成但未能获取结果");
         }
       } catch (err: unknown) {
         const message =

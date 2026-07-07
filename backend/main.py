@@ -93,9 +93,16 @@ async def start_analysis(req: AnalyzeRequest):
 
     file_hash = compute_sha256(req.file_path)
 
-    # Cache hit → return immediately
+    # Cache hit → return immediately with state set
     cache = _get_cache_service()
     if cache and cache.exists(file_hash):
+        cached_data = cache.get(file_hash) or {}
+        _analysis_states[file_hash] = {
+            "status": "completed",
+            "file_path": req.file_path,
+            "modules": [],
+            "result": cached_data,
+        }
         return AnalyzeResponse(file_hash=file_hash, cached=True,
                                 message="分析结果已缓存")
 
@@ -163,6 +170,13 @@ async def start_analysis_upload(
     # Check cache
     cache = _get_cache_service()
     if cache and cache.exists(file_hash):
+        cached_data = cache.get(file_hash) or {}
+        _analysis_states[file_hash] = {
+            "status": "completed",
+            "file_path": file_path,
+            "modules": [],
+            "result": cached_data,
+        }
         return AnalyzeResponse(file_hash=file_hash, cached=True, message="分析结果已缓存")
 
     module_list = [m.strip() for m in modules.split(",") if m.strip()]
