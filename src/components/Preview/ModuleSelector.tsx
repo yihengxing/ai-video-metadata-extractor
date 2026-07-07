@@ -43,6 +43,7 @@ const ModuleSelector: React.FC = () => {
   const isAnalyzing = useAnalysisStore((s) => s.isAnalyzing);
   const progress = useAnalysisStore((s) => s.progress);
   const currentFile = useAnalysisStore((s) => s.currentFile);
+  const currentFileObject = useAnalysisStore((s) => s.currentFileObject);
   const toggleModule = useAnalysisStore((s) => s.toggleModule);
   const { startAnalysis } = useAnalysis();
 
@@ -52,7 +53,9 @@ const ModuleSelector: React.FC = () => {
 
   const handleStart = async () => {
     if (!currentFile) return;
-    await startAnalysis(currentFile);
+    // Pass File object if available (browser mode), otherwise pass path string
+    const input = currentFileObject ?? currentFile;
+    await startAnalysis(input);
   };
 
   // Compute an aggregate progress percentage across active modules

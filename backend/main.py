@@ -7,9 +7,12 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import tempfile
+import shutil
+from pathlib import Path
 
 from backend.orchestrator import AnalysisOrchestrator, WebSocketManager
 
@@ -107,6 +110,70 @@ async def start_analysis(req: AnalyzeRequest):
     asyncio.create_task(
         _run_analysis_background(req.file_path, req.modules, file_hash)
     )
+
+    return AnalyzeResponse(file_hash=file_hash, message="分析已开始")
+
+
+@app.post("/analyze/upload", response_model=AnalyzeResponse)
+async def start_analysis_upload(
+    file: UploadFile = File(...),
+    modules: str = "tech,visual,audio,ai,source_recovery",
+):
+    """Browser-compatible endpoint: upload video file, save to temp dir, then analyze.
+
+    The regular /analyze endpoint requires a local file path (works in Electron).
+    In browser mode, JavaScript cannot access local paths, so we accept the file
+    as a multipart upload instead.
+    """
+    from backend.utils.file_utils import validate_video_file, compute_sha256
+
+    if not file.filename:
+        raise HTTPException(400, "未提供文件名")
+
+    # Check extension
+    ext = Path(file.filename).suffix.lower()
+    allowed = {".mp4", ".webm", ".flv", ".mkv", ".mov", ".avi"}
+    if ext not in allowed:
+        raise HTTPException(400, f"不支持的格式 {ext}，支持: {', '.join(sorted(allowed))}")
+
+    # Save to temp directory
+    upload_dir = Path(tempfile.gettempdir()) / "ai-video-analyzer-uploads"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    dest = upload_dir / file.filename
+
+    try:
+        with open(dest, "wb") as f:
+            while True:
+                chunk = await file.read(8 * 1024 * 1024)  # 8MB chunks
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception:
+        raise HTTPException(500, "文件保存失败")
+
+    file_path = str(dest)
+
+    # Validate and hash
+    ok, err = validate_video_file(file_path)
+    if not ok:
+        raise HTTPException(400, err)
+
+    file_hash = compute_sha256(file_path)
+
+    # Check cache
+    cache = _get_cache_service()
+    if cache and cache.exists(file_hash):
+        return AnalyzeResponse(file_hash=file_hash, cached=True, message="分析结果已缓存")
+
+    module_list = [m.strip() for m in modules.split(",") if m.strip()]
+
+    _analysis_states[file_hash] = {
+        "status": "running",
+        "file_path": file_path,
+        "modules": module_list,
+    }
+
+    asyncio.create_task(_run_analysis_background(file_path, module_list, file_hash))
 
     return AnalyzeResponse(file_hash=file_hash, message="分析已开始")
 

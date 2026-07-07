@@ -17,7 +17,14 @@ export function useAnalysis() {
   useWebSocket(store.currentHash);
 
   const startAnalysis = useCallback(
-    async (filePath: string) => {
+    async (fileOrPath: string | File) => {
+      let filePath: string;
+      if (typeof fileOrPath === "string") {
+        filePath = fileOrPath;
+      } else {
+        // Browser mode: use the file name as display path
+        filePath = fileOrPath.name;
+      }
       store.setFile(filePath);
       store.setError(null);
       store.setProgress("", 0);
@@ -26,7 +33,15 @@ export function useAnalysis() {
 
       try {
         store.setIsAnalyzing(true);
-        const { file_hash } = await api.startAnalysis(filePath, modules);
+
+        // In Electron: send path. In browser: upload file.
+        let file_hash: string;
+        if (typeof fileOrPath === "string") {
+          ({ file_hash } = await api.startAnalysis(fileOrPath, modules));
+        } else {
+          ({ file_hash } = await api.uploadAndAnalyze(fileOrPath, modules));
+        }
+
         store.setHash(file_hash);
 
         // Poll for completion since backend is in-memory for now.

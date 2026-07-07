@@ -65,8 +65,14 @@ const VideoPreview: React.FC = () => {
       if (files && files.length > 0) {
         const file = files[0];
         // In Electron, we can use the path property for full file path
-        const filePath = (file as unknown as { path?: string }).path ?? file.name;
-        setFile(filePath);
+        const filePath = (file as unknown as { path?: string }).path;
+        if (filePath) {
+          // Electron: has full local path — send path to backend
+          setFile(filePath);
+        } else {
+          // Browser: no local path — store File object and upload later
+          setFile(file.name, file);
+        }
       }
     },
     [setFile],

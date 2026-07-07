@@ -17,6 +17,7 @@ export interface HistoryEntry {
 export interface AnalysisState {
   // ---- Current analysis ----
   currentFile: string | null;
+  currentFileObject: File | null;  // Browser mode: the actual File object
   currentHash: string | null;
   selectedModules: ModuleKey[];
   isAnalyzing: boolean;
@@ -33,7 +34,7 @@ export interface AnalysisState {
   rightResult: AnalysisResult | null;
 
   // ---- Actions ----
-  setFile: (path: string) => void;
+  setFile: (path: string, fileObj?: File) => void;
   setHash: (hash: string) => void;
   toggleModule: (module: ModuleKey) => void;
   setIsAnalyzing: (v: boolean) => void;
@@ -68,6 +69,7 @@ function persistHistory(history: HistoryEntry[]): void {
 
 const initialState = {
   currentFile: null as string | null,
+  currentFileObject: null as File | null,
   currentHash: null as string | null,
   selectedModules: ["tech"] as ModuleKey[],
   isAnalyzing: false,
@@ -83,7 +85,8 @@ const initialState = {
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
   ...initialState,
 
-  setFile: (path: string) => set({ currentFile: path }),
+  setFile: (path: string, fileObj?: File) =>
+    set({ currentFile: path, currentFileObject: fileObj ?? null }),
 
   setHash: (hash: string) => set({ currentHash: hash }),
 

@@ -56,6 +56,26 @@ class ApiClient {
     return res.json();
   }
 
+  /** Browser-mode: upload file content directly (no local path access). */
+  async uploadAndAnalyze(
+    file: File,
+    modules: string[],
+  ): Promise<{ file_hash: string }> {
+    await this.ensureInit();
+    const form = new FormData();
+    form.append("file", file);
+    form.append("modules", modules.join(","));
+    const res = await fetch(`${this.baseUrl}/analyze/upload`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
   async getAnalysisStatus(
     fileHash: string,
   ): Promise<Record<string, unknown>> {
