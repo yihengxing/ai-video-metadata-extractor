@@ -150,11 +150,20 @@ class AnalysisOrchestrator:
         if self.cache.exists(file_hash):
             cached = self.cache.get(file_hash)
             if cached:
-                logger.info("Cache hit for %s — returning cached result", file_hash)
-                result = AnalysisResult(**cached)
-                await self._broadcast(ws_manager, file_hash, "cache", "completed",
-                                       100.0, message="从缓存加载")
-                return result
+                cached_version = cached.get("schema_version", "")
+                if cached_version != "1.3.0":
+                    logger.warning(
+                        "Schema version mismatch: cached=%s current=1.3.0 — "
+                        "discarding stale cache for %s and re-analysing",
+                        cached_version, file_hash,
+                    )
+                    self.cache.delete(file_hash)
+                else:
+                    logger.info("Cache hit for %s — returning cached result", file_hash)
+                    result = AnalysisResult(**cached)
+                    await self._broadcast(ws_manager, file_hash, "cache", "completed",
+                                           100.0, message="从缓存加载")
+                    return result
 
         module_status: dict[str, ModuleStatusValue] = {}
 
@@ -250,8 +259,60 @@ class AnalysisOrchestrator:
         return result
 
     # ------------------------------------------------------------------
-    # Per-module runners (graceful degradation)
+    # Per-module runner (shared helper + thin wrappers)
     # ------------------------------------------------------------------
+
+    async def _run_module(
+        self,
+        name: str,
+        coro,
+        timeout: Optional[float],
+        ws_manager: Optional[WebSocketManager],
+        file_hash: str,
+        module_status: dict[str, ModuleStatusValue],
+    ):
+        """Run a single analysis module with the common broadcast / try-catch
+        / status-update pattern shared by all five modules.
+
+        Parameters
+        ----------
+        name : str
+            Module identifier (``"tech"``, ``"visual"``, ``"audio"``,
+            ``"ai"``, ``"source_recovery"``).
+        coro : Awaitable
+            The coroutine that performs the actual work (already constructed
+            with the appropriate arguments by the caller).
+        timeout : float or None
+            If not ``None``, ``asyncio.wait_for(coro, timeout)`` is used.
+        """
+        _LABELS: dict[str, tuple[str, str, str]] = {
+            "tech":             ("开始技术提取...",   "技术提取完成",   "技术提取失败"),
+            "visual":           ("开始视觉分析...",   "视觉分析完成",   "视觉分析失败"),
+            "audio":            ("开始音频分析...",   "音频分析完成",   "音频分析失败"),
+            "ai":               ("开始AI推断...",     "AI推断完成",     "AI推断失败"),
+            "source_recovery":  ("开始源回捞匹配...", "源回捞完成",     "源回捞失败"),
+        }
+        run_msg, done_msg, fail_msg = _LABELS[name]
+
+        await self._broadcast(ws_manager, file_hash, name, "running", 0.0,
+                              message=run_msg)
+        try:
+            if timeout is not None:
+                result = await asyncio.wait_for(coro, timeout=timeout)
+            else:
+                result = await coro
+            module_status[name] = "completed"
+            await self._broadcast(ws_manager, file_hash, name, "completed", 100.0,
+                                  message=done_msg)
+            return result
+        except Exception as exc:
+            logger.exception("%s failed: %s", name, exc)
+            module_status[name] = "failed"
+            await self._broadcast(ws_manager, file_hash, name, "failed", 0.0,
+                                  message=f"{fail_msg}: {exc}")
+            return None
+
+    # -- thin wrappers that construct the coroutine and delegate -----------
 
     async def _run_tech(
         self,
@@ -260,23 +321,15 @@ class AnalysisOrchestrator:
         ws_manager: Optional[WebSocketManager],
         module_status: dict[str, ModuleStatusValue],
     ) -> Optional[dict]:
-        await self._broadcast(ws_manager, file_hash, "tech", "running", 0.0,
-                               message="开始技术提取...")
-        try:
-            result = await self.tech_extractor.extract(
-                file_path, _DUMMY_TECH,
-                progress_cb=self._make_cb(ws_manager, file_hash),
-            )
-            module_status["tech"] = "completed"
-            await self._broadcast(ws_manager, file_hash, "tech", "completed",
-                                   100.0, message="技术提取完成")
-            return result
-        except Exception as exc:
-            logger.exception("Tech extraction failed: %s", exc)
-            module_status["tech"] = "failed"
-            await self._broadcast(ws_manager, file_hash, "tech", "failed",
-                                   0.0, message=f"技术提取失败: {exc}")
-            return None
+        cb = self._make_cb(ws_manager, file_hash)
+        return await self._run_module(
+            "tech",
+            self.tech_extractor.extract(file_path, _DUMMY_TECH, progress_cb=cb),
+            timeout=None,
+            ws_manager=ws_manager,
+            file_hash=file_hash,
+            module_status=module_status,
+        )
 
     async def _run_visual(
         self,
@@ -286,26 +339,15 @@ class AnalysisOrchestrator:
         ws_manager: Optional[WebSocketManager],
         module_status: dict[str, ModuleStatusValue],
     ) -> Optional[dict]:
-        await self._broadcast(ws_manager, file_hash, "visual", "running", 0.0,
-                               message="开始视觉分析...")
-        try:
-            result = await asyncio.wait_for(
-                self.visual_analyzer.extract(
-                    file_path, tech_meta,
-                    progress_cb=self._make_cb(ws_manager, file_hash),
-                ),
-                timeout=120.0,
-            )
-            module_status["visual"] = "completed"
-            await self._broadcast(ws_manager, file_hash, "visual", "completed",
-                                   100.0, message="视觉分析完成")
-            return result
-        except Exception as exc:
-            logger.exception("Visual analysis failed: %s", exc)
-            module_status["visual"] = "failed"
-            await self._broadcast(ws_manager, file_hash, "visual", "failed",
-                                   0.0, message=f"视觉分析失败: {exc}")
-            return None
+        cb = self._make_cb(ws_manager, file_hash)
+        return await self._run_module(
+            "visual",
+            self.visual_analyzer.extract(file_path, tech_meta, progress_cb=cb),
+            timeout=120.0,
+            ws_manager=ws_manager,
+            file_hash=file_hash,
+            module_status=module_status,
+        )
 
     async def _run_audio(
         self,
@@ -315,26 +357,15 @@ class AnalysisOrchestrator:
         ws_manager: Optional[WebSocketManager],
         module_status: dict[str, ModuleStatusValue],
     ) -> Optional[dict]:
-        await self._broadcast(ws_manager, file_hash, "audio", "running", 0.0,
-                               message="开始音频分析...")
-        try:
-            result = await asyncio.wait_for(
-                self.audio_analyzer.extract(
-                    file_path, tech_meta,
-                    progress_cb=self._make_cb(ws_manager, file_hash),
-                ),
-                timeout=120.0,
-            )
-            module_status["audio"] = "completed"
-            await self._broadcast(ws_manager, file_hash, "audio", "completed",
-                                   100.0, message="音频分析完成")
-            return result
-        except Exception as exc:
-            logger.exception("Audio analysis failed: %s", exc)
-            module_status["audio"] = "failed"
-            await self._broadcast(ws_manager, file_hash, "audio", "failed",
-                                   0.0, message=f"音频分析失败: {exc}")
-            return None
+        cb = self._make_cb(ws_manager, file_hash)
+        return await self._run_module(
+            "audio",
+            self.audio_analyzer.extract(file_path, tech_meta, progress_cb=cb),
+            timeout=120.0,
+            ws_manager=ws_manager,
+            file_hash=file_hash,
+            module_status=module_status,
+        )
 
     async def _run_ai(
         self,
@@ -346,28 +377,20 @@ class AnalysisOrchestrator:
         ws_manager: Optional[WebSocketManager],
         module_status: dict[str, ModuleStatusValue],
     ) -> Optional[dict]:
-        await self._broadcast(ws_manager, file_hash, "ai", "running", 0.0,
-                               message="开始AI推断...")
-        try:
-            result = await asyncio.wait_for(
-                self.ai_inferrer.extract(
-                    file_path, tech_meta,
-                    progress_cb=self._make_cb(ws_manager, file_hash),
-                    keyframe_paths=keyframe_paths,
-                    audio_text=audio_text,
-                ),
-                timeout=90.0,
-            )
-            module_status["ai"] = "completed"
-            await self._broadcast(ws_manager, file_hash, "ai", "completed",
-                                   100.0, message="AI推断完成")
-            return result
-        except Exception as exc:
-            logger.exception("AI inference failed: %s", exc)
-            module_status["ai"] = "failed"
-            await self._broadcast(ws_manager, file_hash, "ai", "failed",
-                                   0.0, message=f"AI推断失败: {exc}")
-            return None
+        cb = self._make_cb(ws_manager, file_hash)
+        return await self._run_module(
+            "ai",
+            self.ai_inferrer.extract(
+                file_path, tech_meta,
+                progress_cb=cb,
+                keyframe_paths=keyframe_paths,
+                audio_text=audio_text,
+            ),
+            timeout=90.0,
+            ws_manager=ws_manager,
+            file_hash=file_hash,
+            module_status=module_status,
+        )
 
     async def _run_source_recovery(
         self,
@@ -376,26 +399,20 @@ class AnalysisOrchestrator:
         ws_manager: Optional[WebSocketManager],
         module_status: dict[str, ModuleStatusValue],
     ) -> Optional[list[dict]]:
-        await self._broadcast(ws_manager, file_hash, "source_recovery", "running",
-                               0.0, message="开始源回捞匹配...")
-        try:
-            hits = await asyncio.wait_for(
-                self.source_matcher.match(
-                    keyframe_paths,
-                    progress_cb=self._make_cb(ws_manager, file_hash),
-                ),
-                timeout=45.0,
-            )
-            module_status["source_recovery"] = "completed"
-            await self._broadcast(ws_manager, file_hash, "source_recovery",
-                                   "completed", 100.0, message="源回捞完成")
+        cb = self._make_cb(ws_manager, file_hash)
+
+        async def _work():
+            hits = await self.source_matcher.match(keyframe_paths, progress_cb=cb)
             return [json.loads(h.model_dump_json()) for h in hits] if hits else []
-        except Exception as exc:
-            logger.exception("Source recovery failed: %s", exc)
-            module_status["source_recovery"] = "failed"
-            await self._broadcast(ws_manager, file_hash, "source_recovery",
-                                   "failed", 0.0, message=f"源回捞失败: {exc}")
-            return None
+
+        return await self._run_module(
+            "source_recovery",
+            _work(),
+            timeout=45.0,
+            ws_manager=ws_manager,
+            file_hash=file_hash,
+            module_status=module_status,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
