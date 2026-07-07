@@ -42,7 +42,7 @@ _analysis_states: dict[str, dict] = {}
 class AnalyzeRequest(BaseModel):
     file_path: str = Field(..., description="Absolute path to the video file")
     modules: list[str] = Field(
-        default=["tech", "visual", "audio", "ai", "source_recovery"],
+        default=["tech"],
         description="Enabled module list",
     )
 
@@ -117,7 +117,7 @@ async def start_analysis(req: AnalyzeRequest):
 @app.post("/analyze/upload", response_model=AnalyzeResponse)
 async def start_analysis_upload(
     file: UploadFile = File(...),
-    modules: str = "tech,visual,audio,ai,source_recovery",
+    modules: str = "tech",
 ):
     """Browser-compatible endpoint: upload video file, save to temp dir, then analyze.
 
