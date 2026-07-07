@@ -16,18 +16,27 @@ PLATFORM_FINGERPRINTS = [
 
 def _find_ffprobe() -> str:
     """查找 ffprobe 可执行文件。"""
-    # 优先使用打包的二进制
+    # 1. 优先使用项目打包的二进制
     bundled = os.path.join(os.path.dirname(__file__), "..", "..", "ffmpeg", "ffprobe.exe")
     if os.path.exists(bundled):
         return bundled
     bundled_nix = os.path.join(os.path.dirname(__file__), "..", "..", "ffmpeg", "ffprobe")
     if os.path.exists(bundled_nix):
         return bundled_nix
-    # Fallback to PATH
+    # 2. 常见 Windows 安装路径
+    for base in [
+        r"C:\Program Files\ffmpeg-master-latest-win64-gpl\bin",
+        r"C:\Program Files\ffmpeg\bin",
+        r"C:\ffmpeg\bin",
+    ]:
+        candidate = os.path.join(base, "ffprobe.exe")
+        if os.path.exists(candidate):
+            return candidate
+    # 3. Fallback to PATH
     path = shutil.which("ffprobe")
     if path:
         return path
-    raise RuntimeError("FFprobe 未找到，请安装 FFmpeg")
+    raise RuntimeError("FFprobe 未找到，请安装 FFmpeg 到 C:\\Program Files\\ffmpeg\\ 或添加至 PATH")
 
 
 def check_ffprobe_installed() -> bool:
