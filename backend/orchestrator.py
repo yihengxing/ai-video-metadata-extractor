@@ -289,9 +289,12 @@ class AnalysisOrchestrator:
         await self._broadcast(ws_manager, file_hash, "visual", "running", 0.0,
                                message="开始视觉分析...")
         try:
-            result = await self.visual_analyzer.extract(
-                file_path, tech_meta,
-                progress_cb=self._make_cb(ws_manager, file_hash),
+            result = await asyncio.wait_for(
+                self.visual_analyzer.extract(
+                    file_path, tech_meta,
+                    progress_cb=self._make_cb(ws_manager, file_hash),
+                ),
+                timeout=120.0,
             )
             module_status["visual"] = "completed"
             await self._broadcast(ws_manager, file_hash, "visual", "completed",
@@ -315,9 +318,12 @@ class AnalysisOrchestrator:
         await self._broadcast(ws_manager, file_hash, "audio", "running", 0.0,
                                message="开始音频分析...")
         try:
-            result = await self.audio_analyzer.extract(
-                file_path, tech_meta,
-                progress_cb=self._make_cb(ws_manager, file_hash),
+            result = await asyncio.wait_for(
+                self.audio_analyzer.extract(
+                    file_path, tech_meta,
+                    progress_cb=self._make_cb(ws_manager, file_hash),
+                ),
+                timeout=120.0,
             )
             module_status["audio"] = "completed"
             await self._broadcast(ws_manager, file_hash, "audio", "completed",
@@ -343,11 +349,14 @@ class AnalysisOrchestrator:
         await self._broadcast(ws_manager, file_hash, "ai", "running", 0.0,
                                message="开始AI推断...")
         try:
-            result = await self.ai_inferrer.extract(
-                file_path, tech_meta,
-                progress_cb=self._make_cb(ws_manager, file_hash),
-                keyframe_paths=keyframe_paths,
-                audio_text=audio_text,
+            result = await asyncio.wait_for(
+                self.ai_inferrer.extract(
+                    file_path, tech_meta,
+                    progress_cb=self._make_cb(ws_manager, file_hash),
+                    keyframe_paths=keyframe_paths,
+                    audio_text=audio_text,
+                ),
+                timeout=90.0,
             )
             module_status["ai"] = "completed"
             await self._broadcast(ws_manager, file_hash, "ai", "completed",
@@ -370,9 +379,12 @@ class AnalysisOrchestrator:
         await self._broadcast(ws_manager, file_hash, "source_recovery", "running",
                                0.0, message="开始源回捞匹配...")
         try:
-            hits = await self.source_matcher.match(
-                keyframe_paths,
-                progress_cb=self._make_cb(ws_manager, file_hash),
+            hits = await asyncio.wait_for(
+                self.source_matcher.match(
+                    keyframe_paths,
+                    progress_cb=self._make_cb(ws_manager, file_hash),
+                ),
+                timeout=45.0,
             )
             module_status["source_recovery"] = "completed"
             await self._broadcast(ws_manager, file_hash, "source_recovery",
