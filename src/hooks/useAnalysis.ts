@@ -97,11 +97,11 @@ async function waitForCompletion(fileHash: string): Promise<void> {
       const state = await api.getAnalysisStatus(fileHash);
       errorStreak = 0;
 
-      if (
-        state.status === "completed" ||
-        state.status === "failed" ||
-        state.status === "skipped"
-      ) {
+      if (state.status === "failed") {
+        const msg = (state as Record<string,unknown>).error as string || "后端分析失败，请查看服务器日志";
+        throw new Error(msg);
+      }
+      if (state.status === "completed" || state.status === "skipped") {
         return;
       }
     } catch {

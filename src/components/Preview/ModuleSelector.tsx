@@ -31,11 +31,11 @@ const MODULE_ICONS: Record<ModuleKey, React.ReactNode> = {
 };
 
 const MODULE_SUBTITLES: Record<ModuleKey, string> = {
-  tech: "约 3 秒",
-  visual: "约 30 秒",
-  audio: "约 20 秒",
-  ai: "约 $0.02/次",
-  source_recovery: "免费额度",
+  tech: "约 3-5 秒 · 本地",
+  visual: "约 30-120 秒 · 需模型",
+  audio: "约 20-60 秒 · 需模型",
+  ai: "约 15-30 秒 · 需 API",
+  source_recovery: "约 5-15 秒 · 需 API",
 };
 
 const ModuleSelector: React.FC = () => {
@@ -44,6 +44,8 @@ const ModuleSelector: React.FC = () => {
   const progress = useAnalysisStore((s) => s.progress);
   const currentFile = useAnalysisStore((s) => s.currentFile);
   const currentFileObject = useAnalysisStore((s) => s.currentFileObject);
+  const error = useAnalysisStore((s) => s.error);
+  const setError = useAnalysisStore((s) => s.setError);
   const toggleModule = useAnalysisStore((s) => s.toggleModule);
   const { startAnalysis } = useAnalysis();
 
@@ -151,6 +153,32 @@ const ModuleSelector: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Error message */}
+      {error && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "8px 12px",
+            background: "rgba(255, 77, 79, 0.1)",
+            border: "1px solid rgba(255, 77, 79, 0.3)",
+            borderRadius: 6,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ color: "#ff7875", fontSize: 13 }}>{error}</span>
+          <Button
+            type="text"
+            size="small"
+            style={{ color: "#ff7875" }}
+            onClick={() => setError(null)}
+          >
+            关闭
+          </Button>
+        </div>
+      )}
     </div>
   );
 };
