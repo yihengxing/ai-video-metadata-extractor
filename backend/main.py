@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import tempfile
@@ -125,7 +125,7 @@ async def start_analysis(req: AnalyzeRequest):
 @app.post("/analyze/upload", response_model=AnalyzeResponse)
 async def start_analysis_upload(
     file: UploadFile = File(...),
-    modules: str = Form("tech"),
+    modules: str = "tech",
 ):
     """Browser-compatible endpoint: upload video file, save to temp dir, then analyze.
 

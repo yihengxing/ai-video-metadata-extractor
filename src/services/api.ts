@@ -66,8 +66,8 @@ class ApiClient {
     await this.ensureInit();
     const form = new FormData();
     form.append("file", file);
-    form.append("modules", modules.join(","));
-    const res = await fetch(`${this.baseUrl}/analyze/upload`, {
+    const qs = `?modules=${encodeURIComponent(modules.join(","))}`;
+    const res = await fetch(`${this.baseUrl}/analyze/upload${qs}`, {
       method: "POST",
       body: form,
     });
