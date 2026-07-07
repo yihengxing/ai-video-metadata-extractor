@@ -11,7 +11,7 @@ CONFIG_DIR = Path.home() / ".ai-video-analyzer"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 KEY_FILE = CONFIG_DIR / ".key"
 
-_SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".webm", ".flv", ".mkv", ".mov", ".avi"}
+SUPPORTED_EXTENSIONS = {".mp4", ".webm", ".flv", ".mkv", ".mov", ".avi"}
 
 
 class Settings:
@@ -96,7 +96,7 @@ class Settings:
 
     @property
     def supported_extensions(self) -> set[str]:
-        return _SUPPORTED_VIDEO_EXTENSIONS
+        return SUPPORTED_EXTENSIONS
 
 
 # 模块级单例

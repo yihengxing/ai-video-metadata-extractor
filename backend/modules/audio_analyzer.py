@@ -108,6 +108,18 @@ class AudioAnalyzer(Extractor):
         if progress_cb:
             progress_cb("audio", 20.0, "音轨提取完成")
 
+        # --- Load audio once for all librosa-dependent analysis -------
+        y_audio = None
+        sr_audio = None
+        if _LIBROSA_AVAILABLE:
+            try:
+                import librosa
+                y_audio, sr_audio = librosa.load(
+                    wav_path, sr=None, duration=120.0
+                )
+            except Exception as exc:
+                logger.warning("Failed to load audio once: %s", exc)
+
         try:
             # --- Guard: faster-whisper available? ---------------------
             if not _WHISPER_AVAILABLE:
@@ -140,34 +152,35 @@ class AudioAnalyzer(Extractor):
             if progress_cb:
                 progress_cb("audio", 88.0, "分析BGM特征...")
             bgm_features = await asyncio.to_thread(
-                self._analyze_bgm_features, wav_path
+                self._analyze_bgm_features, wav_path, y_audio, sr_audio
             )
 
             # --- Step 6: speech emotion classification ---------------
             if progress_cb:
                 progress_cb("audio", 95.0, "分析语音情感...")
             speech_emotion = await asyncio.to_thread(
-                self._classify_speech_emotion, wav_path
+                self._classify_speech_emotion, wav_path, y_audio, sr_audio
             )
 
             # --- Step 7: sound event detection (Task 14) --------------
             if progress_cb:
                 progress_cb("audio", 96.0, "检测音效事件...")
             sound_events = await asyncio.to_thread(
-                self._detect_sound_events, wav_path
+                self._detect_sound_events, wav_path, y_audio, sr_audio
             )
 
             # --- Step 8: loudness / voice-to-background ratio ---------
             if progress_cb:
                 progress_cb("audio", 98.0, "分析响度与人声比例...")
             voice_to_bg_ratio = await asyncio.to_thread(
-                self._analyze_loudness, wav_path, text_segments
+                self._analyze_loudness, wav_path, text_segments, y_audio, sr_audio
             )
 
             # --- Step 9: audio structure segmentation -----------------
             audio_structure = await asyncio.to_thread(
                 self._segment_structure, wav_path,
                 tech_meta.duration if tech_meta.duration else 0.0,
+                y_audio, sr_audio,
             )
 
             if progress_cb:
@@ -444,8 +457,17 @@ class AudioAnalyzer(Extractor):
     # BPM detection + BGM emotion (Step 5)
     # ------------------------------------------------------------------
 
-    def _analyze_bgm_features(self, wav_path: str) -> dict:
+    def _analyze_bgm_features(self, wav_path: str, y=None, sr=None) -> dict:
         """Detect BPM and classify BGM emotion using librosa spectral features.
+
+        Parameters
+        ----------
+        wav_path : str
+            Path to the WAV file (used as fallback when *y*/*sr* are None).
+        y : np.ndarray or None
+            Pre-loaded audio time-series (avoids a redundant load).
+        sr : int or None
+            Sample rate corresponding to *y*.
 
         Returns ``{"bpm": int|None, "emotion": str|None}``.
         """
@@ -460,7 +482,8 @@ class AudioAnalyzer(Extractor):
             import librosa
             import numpy as np
 
-            y, sr = librosa.load(wav_path, sr=None, duration=30.0)
+            if y is None or sr is None:
+                y, sr = librosa.load(wav_path, sr=None, duration=30.0)
 
             # --- BPM detection ---
             tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
@@ -490,8 +513,17 @@ class AudioAnalyzer(Extractor):
     # Speech emotion classification (Step 6)
     # ------------------------------------------------------------------
 
-    def _classify_speech_emotion(self, wav_path: str) -> str:
+    def _classify_speech_emotion(self, wav_path: str, y=None, sr=None) -> str:
         """Classify speech emotion using librosa spectral features.
+
+        Parameters
+        ----------
+        wav_path : str
+            Path to the WAV file (used as fallback when *y*/*sr* are None).
+        y : np.ndarray or None
+            Pre-loaded audio time-series (avoids a redundant load).
+        sr : int or None
+            Sample rate corresponding to *y*.
 
         Returns one of: ``"平静"`` / ``"激昂"`` / ``"悲伤"`` / ``"幽默"`` / ``"中性"``.
         """
@@ -506,7 +538,8 @@ class AudioAnalyzer(Extractor):
             import librosa
             import numpy as np
 
-            y, sr = librosa.load(wav_path, sr=None, duration=30.0)
+            if y is None or sr is None:
+                y, sr = librosa.load(wav_path, sr=None, duration=30.0)
 
             # --- MFCC features ---
             mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -547,13 +580,22 @@ class AudioAnalyzer(Extractor):
     # Sound event detection (Step 7 — Task 14)
     # ------------------------------------------------------------------
 
-    def _detect_sound_events(self, wav_path: str) -> list[str]:
+    def _detect_sound_events(self, wav_path: str, y=None, sr=None) -> list[str]:
         """Detect and classify audio events using librosa onset detection.
 
         Uses spectral features to classify each detected onset into:
           - "转场音效" (transition SFX): short burst + high frequency
           - "UI点击音" (UI click): repeated pattern
           - "爆炸/环境音" (explosion/ambient): low-frequency rumble
+
+        Parameters
+        ----------
+        wav_path : str
+            Path to the WAV file (used as fallback when *y*/*sr* are None).
+        y : np.ndarray or None
+            Pre-loaded audio time-series (avoids a redundant load).
+        sr : int or None
+            Sample rate corresponding to *y*.
 
         Returns a list of detected event type strings (may be empty).
         If librosa is unavailable, returns an empty list.
@@ -566,7 +608,8 @@ class AudioAnalyzer(Extractor):
             import librosa
             import numpy as np
 
-            y, sr = librosa.load(wav_path, sr=None, duration=30.0)
+            if y is None or sr is None:
+                y, sr = librosa.load(wav_path, sr=None, duration=30.0)
 
             # Detect onsets (event boundaries)
             onset_frames = librosa.onset.onset_detect(
@@ -640,13 +683,25 @@ class AudioAnalyzer(Extractor):
     # ------------------------------------------------------------------
 
     def _analyze_loudness(
-        self, wav_path: str, text_segments: list[dict]
+        self, wav_path: str, text_segments: list[dict],
+        y=None, sr=None,
     ) -> Optional[str]:
         """Analyze loudness and voice-to-background ratio using librosa.
 
         Computes RMS energy for speech segments (from *text_segments* timestamps)
         vs. non-speech segments, then returns a descriptive ratio string with
         an approximate LUFS estimate when possible.
+
+        Parameters
+        ----------
+        wav_path : str
+            Path to the WAV file (used as fallback when *y*/*sr* are None).
+        text_segments : list[dict]
+            Speech segments with ``{"start": float, "end": float}``.
+        y : np.ndarray or None
+            Pre-loaded audio time-series (avoids a redundant load).
+        sr : int or None
+            Sample rate corresponding to *y*.
 
         Returns a string like ``"人声占主导 / -14 LUFS"`` or ``None`` if
         librosa is unavailable.
@@ -659,7 +714,8 @@ class AudioAnalyzer(Extractor):
             import librosa
             import numpy as np
 
-            y, sr = librosa.load(wav_path, sr=None, duration=60.0)
+            if y is None or sr is None:
+                y, sr = librosa.load(wav_path, sr=None, duration=60.0)
             total_samples = len(y)
             total_duration = total_samples / sr
 
@@ -737,12 +793,24 @@ class AudioAnalyzer(Extractor):
     # ------------------------------------------------------------------
 
     def _segment_structure(
-        self, wav_path: str, duration: float
+        self, wav_path: str, duration: float,
+        y=None, sr=None,
     ) -> Optional[str]:
         """Segment audio into structural sections using spectral flux.
 
         Detects major changes in spectral features to divide audio into:
         intro, main sections, transitions, and outro.
+
+        Parameters
+        ----------
+        wav_path : str
+            Path to the WAV file (used as fallback when *y*/*sr* are None).
+        duration : float
+            Total duration of the audio in seconds.
+        y : np.ndarray or None
+            Pre-loaded audio time-series (avoids a redundant load).
+        sr : int or None
+            Sample rate corresponding to *y*.
 
         Returns a string like ``"前奏(0-3s) → 主段1(3-12s) → ..."``.
         For audio shorter than 5 seconds, a simple description is returned.
@@ -760,7 +828,8 @@ class AudioAnalyzer(Extractor):
             if duration < 5.0:
                 return f"简短视频音频 ({duration:.1f}s)"
 
-            y, sr = librosa.load(wav_path, sr=None, duration=min(duration, 120.0))
+            if y is None or sr is None:
+                y, sr = librosa.load(wav_path, sr=None, duration=min(duration, 120.0))
 
             # --- Compute spectral flux (frame-to-frame change) ---
             # Use mel spectrogram for better perceptual relevance

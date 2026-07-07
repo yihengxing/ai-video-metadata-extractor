@@ -3,7 +3,8 @@ import hashlib
 import os
 from typing import Tuple
 
-SUPPORTED_EXTENSIONS = {".mp4", ".webm", ".flv", ".mkv", ".mov", ".avi"}
+from backend.config import SUPPORTED_EXTENSIONS
+
 SUPPORTED_EXTENSIONS_STR = "、".join(sorted(SUPPORTED_EXTENSIONS))
 
 

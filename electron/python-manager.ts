@@ -118,12 +118,19 @@ export class PythonManager {
       console.log(`[PythonManager] Detected backend port: ${this.port}`);
     } catch (err) {
       console.error(`[PythonManager] Failed to detect port: ${(err as Error).message}`);
+      await this.stop();
       throw err;
     }
 
     // Health-check: GET /health every 500ms until 200 or timeout (30s)
-    await this.waitForHealth();
-    console.log('[PythonManager] Backend is healthy and ready.');
+    try {
+      await this.waitForHealth();
+      console.log('[PythonManager] Backend is healthy and ready.');
+    } catch (err) {
+      console.error(`[PythonManager] Health check failed: ${(err as Error).message}`);
+      await this.stop();
+      throw err;
+    }
   }
 
   /**

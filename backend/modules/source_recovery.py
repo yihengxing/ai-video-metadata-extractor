@@ -515,7 +515,7 @@ def _extract_workflow_from_html(html: str) -> Optional[str]:
     """
     # Strategy 1: window.__WORKFLOW__ = {...};
     m = re.search(
-        r"window\.__WORKFLOW__\s*=\s*(\{.*?\})\s*;",
+        r"window\.__WORKFLOW__\s*=\s*(\{.*\})\s*;",
         html,
         re.DOTALL,
     )

@@ -14,6 +14,7 @@ import tempfile
 import shutil
 from pathlib import Path
 
+from backend.config import SUPPORTED_EXTENSIONS
 from backend.orchestrator import AnalysisOrchestrator, WebSocketManager
 
 app = FastAPI(title="AI Video Metadata Extractor", version="1.3.0")
@@ -140,7 +141,7 @@ async def start_analysis_upload(
 
     # Check extension
     ext = Path(file.filename).suffix.lower()
-    allowed = {".mp4", ".webm", ".flv", ".mkv", ".mov", ".avi"}
+    allowed = SUPPORTED_EXTENSIONS
     if ext not in allowed:
         raise HTTPException(400, f"不支持的格式 {ext}，支持: {', '.join(sorted(allowed))}")
 
@@ -295,7 +296,7 @@ async def websocket_progress(websocket: WebSocket, file_hash: str):
     try:
         while True:
             await websocket.receive_text()  # keep-alive
-    except WebSocketDisconnect:
+    except Exception:
         ws_manager.unregister(file_hash, websocket)
 
 
